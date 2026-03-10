@@ -149,7 +149,9 @@ err_t smtp_channel_init(smtp_channel_t *ch, uv_loop_t *loop,
     ch->loop = loop;
     ch->port = port;
     strncpy(ch->host,   host,   sizeof(ch->host)   - 1);
+    ch->host[sizeof(ch->host) - 1] = '\0';
     strncpy(ch->domain, domain, sizeof(ch->domain) - 1);
+    ch->domain[sizeof(ch->domain) - 1] = '\0';
 
     uv_tcp_init(loop, &ch->tcp);
     ch->tcp.data          = ch;
@@ -214,6 +216,7 @@ void smtp_channel_free(smtp_channel_t *ch)
         return;
     }
     ch->connected = 0;
+    uv_read_stop((uv_stream_t *)&ch->tcp);
     if (!uv_is_closing((uv_handle_t *)&ch->tcp)) {
         uv_close((uv_handle_t *)&ch->tcp, smtp_close_cb);
     }

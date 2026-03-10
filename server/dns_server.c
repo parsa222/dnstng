@@ -167,8 +167,13 @@ static void recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf,
             {
                 uv_udp_send_t *sreq = (uv_udp_send_t *)malloc(sizeof(uv_udp_send_t));
                 if (sreq) {
+                    int sr;
                     sreq->data = rbuf;
-                    uv_udp_send(sreq, handle, &ubuf, 1, addr, send_cb);
+                    sr = uv_udp_send(sreq, handle, &ubuf, 1, addr, send_cb);
+                    if (sr < 0) {
+                        free(rbuf);
+                        free(sreq);
+                    }
                 } else {
                     free(rbuf);
                 }
@@ -220,6 +225,7 @@ err_t dns_server_init(dns_server_t *srv, uv_loop_t *loop,
     memset(srv, 0, sizeof(*srv));
     srv->loop = loop;
     strncpy(srv->domain, domain, sizeof(srv->domain) - 1);
+    srv->domain[sizeof(srv->domain) - 1] = '\0';
 
     r = uv_udp_init(loop, &srv->udp);
     if (r < 0) {
@@ -318,7 +324,14 @@ err_t dns_server_respond(dns_server_t *srv, uint16_t query_id,
     ubuf.base  = (char *)rbuf;
     ubuf.len   = (size_t)rlen;
 
-    uv_udp_send(sreq, &srv->udp, &ubuf, 1, to, send_cb);
+    {
+        int sr = uv_udp_send(sreq, &srv->udp, &ubuf, 1, to, send_cb);
+        if (sr < 0) {
+            free(rbuf);
+            free(sreq);
+            return ERR_IO;
+        }
+    }
 
     return ERR_OK;
 }

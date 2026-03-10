@@ -70,6 +70,7 @@ int main(int argc, char *argv[])
         } else if (strcmp(argv[i], "--domain") == 0 && i + 1 < argc) {
             i++;
             strncpy(cfg.domain, argv[i], sizeof(cfg.domain) - 1);
+            cfg.domain[sizeof(cfg.domain) - 1] = '\0';
         } else if (strcmp(argv[i], "--listen") == 0 && i + 1 < argc) {
             i++;
             parse_addr_port(argv[i], cfg.bind_addr,
@@ -77,6 +78,7 @@ int main(int argc, char *argv[])
         } else if (strcmp(argv[i], "--upstream") == 0 && i + 1 < argc) {
             i++;
             strncpy(cfg.upstream_dns, argv[i], sizeof(cfg.upstream_dns) - 1);
+            cfg.upstream_dns[sizeof(cfg.upstream_dns) - 1] = '\0';
         } else if (strcmp(argv[i], "--loglevel") == 0 && i + 1 < argc) {
             i++;
             cfg.log_level = parse_loglevel(argv[i]);

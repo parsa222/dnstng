@@ -344,6 +344,15 @@ static void ares_timer_cb(uv_timer_t *timer)
     ares_process_fd(ch, ARES_SOCKET_BAD, ARES_SOCKET_BAD);
 }
 
+static void connectivity_timeout_cb(uv_timer_t *timer)
+{
+    check_ctx_t *ctx = (check_ctx_t *)timer->data;
+    if (!ctx->done) {
+        ctx->done = 1;
+        uv_stop(ctx->loop);
+    }
+}
+
 err_t run_connectivity_check(const client_config_t *cfg)
 {
     ares_channel       ch;
@@ -351,6 +360,7 @@ err_t run_connectivity_check(const client_config_t *cfg)
     int                optmask = 0;
     uv_loop_t          loop;
     uv_timer_t         timer;
+    uv_timer_t         timeout_timer;
     check_ctx_t        ctx;
     char               fqdn[512];
     struct ares_addr_node servers;
@@ -389,10 +399,16 @@ err_t run_connectivity_check(const client_config_t *cfg)
     timer.data = ch;
     uv_timer_start(&timer, ares_timer_cb, 100, 100);
 
+    uv_timer_init(&loop, &timeout_timer);
+    timeout_timer.data = &ctx;
+    uv_timer_start(&timeout_timer, connectivity_timeout_cb, 5000, 0);
+
     uv_run(&loop, UV_RUN_DEFAULT);
 
     uv_timer_stop(&timer);
+    uv_timer_stop(&timeout_timer);
     uv_close((uv_handle_t *)&timer, NULL);
+    uv_close((uv_handle_t *)&timeout_timer, NULL);
     uv_run(&loop, UV_RUN_NOWAIT);
 
     ares_destroy(ch);

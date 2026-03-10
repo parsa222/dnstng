@@ -533,7 +533,13 @@ void tunnel_client_stop(tunnel_client_t *tc)
         return;
     }
     uv_timer_stop(&tc->poll_timer);
+    if (!uv_is_closing((uv_handle_t *)&tc->poll_timer)) {
+        uv_close((uv_handle_t *)&tc->poll_timer, NULL);
+    }
     uv_timer_stop(&tc->retransmit_timer);
+    if (!uv_is_closing((uv_handle_t *)&tc->retransmit_timer)) {
+        uv_close((uv_handle_t *)&tc->retransmit_timer, NULL);
+    }
 }
 
 err_t tunnel_client_send(tunnel_client_t *tc, uint16_t stream_id,
