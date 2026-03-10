@@ -28,9 +28,10 @@ target_link_libraries(dnstunnel-client common_lib)
 
 # Server binary
 add_executable(dnstunnel-server
-    server/main.c server/dns_server.c server/tunnel_server.c server/proxy.c)
+    server/main.c server/dns_server.c server/tunnel_server.c server/proxy.c
+    server/chain.c)
 target_include_directories(dnstunnel-server PRIVATE
-    common third_party ${LIBUV_INCLUDE_DIRS} ${CARES_INCLUDE_DIRS})
+    common server third_party ${LIBUV_INCLUDE_DIRS} ${CARES_INCLUDE_DIRS})
 target_link_libraries(dnstunnel-server common_lib)
 
 # Tests
@@ -38,7 +39,8 @@ enable_testing()
 foreach(test_src
     tests/test_encode.c
     tests/test_transport.c
-    tests/test_dns_packet.c)
+    tests/test_dns_packet.c
+    tests/test_channel.c)
     get_filename_component(test_name ${test_src} NAME_WE)
     add_executable(${test_name} ${test_src})
     target_include_directories(${test_name} PRIVATE
@@ -46,3 +48,10 @@ foreach(test_src
     target_link_libraries(${test_name} common_lib)
     add_test(NAME ${test_name} COMMAND ${test_name})
 endforeach()
+
+# test_chain needs server/chain.c
+add_executable(test_chain tests/test_chain.c server/chain.c)
+target_include_directories(test_chain PRIVATE
+    common server third_party ${LIBUV_INCLUDE_DIRS} ${CARES_INCLUDE_DIRS})
+target_link_libraries(test_chain common_lib)
+add_test(NAME test_chain COMMAND test_chain)

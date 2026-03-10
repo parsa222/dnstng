@@ -775,3 +775,48 @@ int dns_build_soa_rdata(const char *mname, const char *rname,
     put_u32(out, off, minimum);  off += 4;
     return (int)off;
 }
+
+int dns_build_svcb_rdata(uint16_t priority, const char *target,
+                         const uint8_t *params, size_t params_len,
+                         uint8_t *out, size_t out_cap)
+{
+    size_t off = 0;
+    int    ret;
+
+    if (!out || out_cap < 2) return -1;
+
+    put_u16(out, 0, priority);
+    off = 2;
+
+    if (target && *target) {
+        ret = encode_labels(target, out, out_cap, off);
+        if (ret < 0) return -1;
+        off = (size_t)ret;
+    } else {
+        if (off >= out_cap) return -1;
+        out[off++] = 0; /* root */
+    }
+
+    if (params && params_len > 0) {
+        if (off + params_len > out_cap) return -1;
+        memcpy(out + off, params, params_len);
+        off += params_len;
+    }
+    return (int)off;
+}
+
+int dns_build_hinfo_rdata(const char *cpu, const char *os,
+                          uint8_t *out, size_t out_cap)
+{
+    size_t off     = 0;
+    size_t cpu_len = cpu ? strlen(cpu) : 0U;
+    size_t os_len  = os  ? strlen(os)  : 0U;
+
+    if (!out || out_cap < 2U + cpu_len + os_len) return -1;
+
+    out[off++] = (uint8_t)cpu_len;
+    if (cpu_len > 0) { memcpy(out + off, cpu, cpu_len); off += cpu_len; }
+    out[off++] = (uint8_t)os_len;
+    if (os_len > 0)  { memcpy(out + off, os,  os_len);  off += os_len; }
+    return (int)off;
+}
