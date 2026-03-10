@@ -147,11 +147,11 @@ static void recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf,
     if (!fqdn_matches_domain(fqdn, srv->domain)) {
         /* Send NXDOMAIN */
         {
-            uint8_t resp[12];
             uv_buf_t ubuf;
             uint8_t *rbuf = (uint8_t *)malloc(12);
 
             if (!rbuf) {
+                LOG_ERROR("dns_server: out of memory for NXDOMAIN response");
                 return;
             }
 
@@ -160,7 +160,6 @@ static void recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf,
             rbuf[3] = 0x83U; /* NXDOMAIN */
             memset(rbuf + 4, 0, 8);
 
-            (void)resp;
             ubuf.base = (char *)rbuf;
             ubuf.len  = 12;
 

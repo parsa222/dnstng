@@ -180,6 +180,11 @@ err_t transport_parse_packet(const uint8_t *buf, size_t len,
         return ERR_PROTO;
     }
 
+    /* Verify CRC to reject corrupted packets early */
+    if (!transport_verify_checksum(buf, TUNNEL_HEADER_SIZE + (size_t)hdr.payload_len)) {
+        return ERR_PROTO;
+    }
+
     *hdr_out         = hdr;
     *payload_out     = buf + TUNNEL_HEADER_SIZE;
     *payload_len_out = hdr.payload_len;

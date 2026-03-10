@@ -55,7 +55,15 @@ static err_t send_raw(socks5_conn_t *conn, const uint8_t *data, size_t len)
     req->data = copy;
     buf       = uv_buf_init((char *)copy, (unsigned int)len);
 
-    uv_write(req, (uv_stream_t *)&conn->tcp, &buf, 1, write_cb);
+    {
+        int r = uv_write(req, (uv_stream_t *)&conn->tcp, &buf, 1, write_cb);
+        if (r < 0) {
+            LOG_WARN("socks5 send_raw: uv_write failed: %s", uv_strerror(r));
+            free(copy);
+            free(req);
+            return ERR_IO;
+        }
+    }
     return ERR_OK;
 }
 

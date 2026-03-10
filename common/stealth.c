@@ -1,4 +1,5 @@
 #include "stealth.h"
+#include "log.h"
 #include <sys/syscall.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -36,6 +37,7 @@ void stealth_random_bytes(uint8_t *buf, size_t len)
     }
 
     /* Last resort: zero-fill (should not happen in practice) */
+    LOG_WARN("stealth_random_bytes: both getrandom and /dev/urandom failed, using zeros");
     memset(buf, 0, len);
 }
 
