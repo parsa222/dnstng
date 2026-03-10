@@ -20,7 +20,7 @@ Two binaries are produced: `dnstunnel-client` and `dnstunnel-server`.
 
 ## Project State
 
-The core infrastructure is complete. The integration layer is **not yet done**.
+The core infrastructure and Priority 1 integration are complete.
 
 ### What is fully implemented and tested
 
@@ -38,14 +38,19 @@ The core infrastructure is complete. The integration layer is **not yet done**.
 - `common/ocsp_channel.c` — OCSP covert channel (HTTP GET)
 - `common/crl_channel.c` — CRL covert channel (HTTP GET)
 - `server/chain.c` — CNAME chain and NS referral chain build/parse
-- All tests in `tests/` pass
+- **`server/tunnel_server.c`** — Multi-channel response (channel_pack + chain build),
+  SYN-ACK with negotiated channel bitmask
+- **`client/tunnel_client.c`** — Multi-channel unpack (channel_unpack + chain parse),
+  SYN with channel bitmask, SYN-ACK channel negotiation
+- **`server/dns_server.c`** — `dns_server_send_raw()` for pre-built DNS packets
+- All 6 tests in `tests/` pass (including `test_integration`)
 
-### What is NOT done — the integration gap
+### What remains (Priority 2+)
 
-The channel/chain/backup code is implemented and unit-tested but **not connected to the live
-tunnel data path**. The server still responds with plain TXT records. The client still only
-reads TXT/NULL records from responses. See `TODO.md` Priority 1 for the exact integration
-steps.
+See `TODO.md` for Priority 2 spec-required features and Priority 3 future ideas.
+The channel/chain/backup code is now fully wired into the tunnel data path.
+Backup channels (SMTP, OCSP, CRL) are implemented as standalone modules but not yet
+connected to the client session fallback logic (TODO #18).
 
 ---
 
@@ -85,6 +90,7 @@ tests/
   test_dns_packet.c
   test_channel.c
   test_chain.c
+  test_integration.c
   run_tests.sh
 ```
 
@@ -124,11 +130,19 @@ tests/
 ## How to Build
 
 ```bash
-# Dependencies (Debian/Ubuntu)
-apt-get install cmake libuv1-dev libcares-dev liblz4-dev
+# Dependencies (Ubuntu 20.04 / 22.04 / 24.04)
+sudo apt-get update
+sudo apt-get install -y build-essential cmake pkg-config \
+    libuv1-dev libc-ares-dev liblz4-dev
 
-# Build
-mkdir build && cd build
+# Quick build (installs deps, compiles, runs tests)
+./build.sh
+
+# Or manual build with GNU Make
+make clean && make all
+
+# Or manual build with CMake
+mkdir -p build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Debug
 make -j$(nproc)
 ```
@@ -149,10 +163,10 @@ make -j$(nproc)
 cd build
 ctest --output-on-failure
 # or directly:
-./test_encode && ./test_transport && ./test_dns_packet && ./test_channel && ./test_chain
+./test_encode && ./test_transport && ./test_dns_packet && ./test_channel && ./test_chain && ./test_integration
 ```
 
-All 5 test binaries must pass before any PR is considered ready.
+All 6 test binaries must pass before any PR is considered ready.
 
 ---
 
@@ -211,11 +225,16 @@ and backup channel host/port fields.
 
 ## Where to Start
 
-1. Read `TODO.md` — the integration tasks in Priority 1 are the critical path.
-2. Read `ARCHITECTURE.md` — understand the data flow before touching `tunnel_server.c`
-   or `tunnel_client.c`.
-3. Run the tests first to confirm the baseline is clean.
-4. Make one integration change at a time and run the full test suite after each.
+1. Read `TODO.md` — Priority 1 is done; Priority 2 has the remaining spec-required features.
+2. Read `ARCHITECTURE.md` — understand the data flow.
+3. Run the tests first to confirm the baseline is clean (`make tests` or `./build.sh`).
+4. The integration test (`tests/test_integration.c`) is the best starting point for
+   understanding how all the pieces fit together.
+
+### Channel negotiation wire format
+
+SYN payload: 4 bytes big-endian `CHAN_*` bitmask (client's supported channels).
+SYN-ACK payload: 4 bytes big-endian `CHAN_*` bitmask (intersection of client+server).
 
 ---
 

@@ -24,8 +24,8 @@ static void test_cname_chain_basic(void)
     fill_seq(data, sizeof(data));
 
     wire_len = chain_build_cname(0x5678,
-                                  "test.tunnel.example.com",
-                                  "tunnel.example.com",
+                                  "test.example.com",
+                                  "example.com",
                                   data, sizeof(data),
                                   3,
                                   wire, sizeof(wire));
@@ -34,7 +34,7 @@ static void test_cname_chain_basic(void)
     assert(dns_parse_response_full(wire, (size_t)wire_len, &parsed)
            == ERR_OK);
 
-    extracted = chain_parse_cname(&parsed, "tunnel.example.com",
+    extracted = chain_parse_cname(&parsed, "example.com",
                                    out, sizeof(out));
     assert(extracted > 0);
     /* The extracted bytes should match the beginning of data
@@ -57,8 +57,8 @@ static void test_cname_chain_depth1(void)
     fill_seq(data, sizeof(data));
 
     wire_len = chain_build_cname(0x1111,
-                                  "q.tunnel.example.com",
-                                  "tunnel.example.com",
+                                  "q.example.com",
+                                  "example.com",
                                   data, sizeof(data),
                                   1,
                                   wire, sizeof(wire));
@@ -67,7 +67,7 @@ static void test_cname_chain_depth1(void)
     assert(dns_parse_response_full(wire, (size_t)wire_len, &parsed)
            == ERR_OK);
 
-    extracted = chain_parse_cname(&parsed, "tunnel.example.com",
+    extracted = chain_parse_cname(&parsed, "example.com",
                                    out, sizeof(out));
     assert(extracted > 0);
 
@@ -86,8 +86,8 @@ static void test_ns_referral_basic(void)
     fill_seq(data, sizeof(data));
 
     wire_len = chain_build_ns_referral(0x9ABC,
-                                        "test.tunnel.example.com",
-                                        "tunnel.example.com",
+                                        "test.example.com",
+                                        "example.com",
                                         data, sizeof(data),
                                         2,
                                         wire, sizeof(wire));
@@ -96,7 +96,7 @@ static void test_ns_referral_basic(void)
     assert(dns_parse_response_full(wire, (size_t)wire_len, &parsed)
            == ERR_OK);
 
-    extracted = chain_parse_ns_referral(&parsed, "tunnel.example.com",
+    extracted = chain_parse_ns_referral(&parsed, "example.com",
                                          out, sizeof(out));
     assert(extracted > 0);
     assert((size_t)extracted <= sizeof(data));
@@ -117,8 +117,8 @@ static void test_ns_referral_depth4(void)
     fill_seq(data, sizeof(data));
 
     wire_len = chain_build_ns_referral(0xDEAD,
-                                        "x.tunnel.example.com",
-                                        "tunnel.example.com",
+                                        "x.example.com",
+                                        "example.com",
                                         data, sizeof(data),
                                         4,
                                         wire, sizeof(wire));
@@ -127,7 +127,7 @@ static void test_ns_referral_depth4(void)
     assert(dns_parse_response_full(wire, (size_t)wire_len, &parsed)
            == ERR_OK);
 
-    extracted = chain_parse_ns_referral(&parsed, "tunnel.example.com",
+    extracted = chain_parse_ns_referral(&parsed, "example.com",
                                          out, sizeof(out));
     assert(extracted > 0);
 

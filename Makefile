@@ -54,7 +54,8 @@ COMMON_SRCS := $(wildcard common/*.c) third_party/lz4.c
 CLIENT_SRCS := client/main.c \
                client/socks5.c \
                client/tunnel_client.c \
-               client/check.c
+               client/check.c \
+               server/chain.c
 
 SERVER_SRCS := server/main.c \
                server/dns_server.c \
@@ -71,6 +72,9 @@ TEST_SRCS := tests/test_encode.c \
 # test_chain also needs server/chain.c (not part of common_lib)
 TEST_CHAIN_SRC := tests/test_chain.c
 
+# test_integration also needs server/chain.c
+TEST_INTEGRATION_SRC := tests/test_integration.c
+
 # ── Object files ──────────────────────────────────────────────────────────────
 COMMON_OBJS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(COMMON_SRCS))
 CLIENT_OBJS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(CLIENT_SRCS))
@@ -81,8 +85,9 @@ COMMON_LIB     := $(BUILD_DIR)/libcommon.a
 CLIENT_BIN     := $(BUILD_DIR)/dnstunnel-client
 SERVER_BIN     := $(BUILD_DIR)/dnstunnel-server
 TEST_BINS      := $(patsubst tests/%.c,$(BUILD_DIR)/%,$(TEST_SRCS))
-TEST_CHAIN_BIN := $(BUILD_DIR)/test_chain
-ALL_TEST_BINS  := $(TEST_BINS) $(TEST_CHAIN_BIN)
+TEST_CHAIN_BIN       := $(BUILD_DIR)/test_chain
+TEST_INTEGRATION_BIN := $(BUILD_DIR)/test_integration
+ALL_TEST_BINS  := $(TEST_BINS) $(TEST_CHAIN_BIN) $(TEST_INTEGRATION_BIN)
 
 # ── Default target ────────────────────────────────────────────────────────────
 .PHONY: all
@@ -114,6 +119,11 @@ $(TEST_BINS): $(BUILD_DIR)/test_%: tests/test_%.c $(COMMON_LIB)
 
 # test_chain needs server/chain.c compiled inline (mirrors CMakeLists.txt)
 $(TEST_CHAIN_BIN): $(TEST_CHAIN_SRC) server/chain.c $(COMMON_LIB)
+	@mkdir -p $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(INCS) $(PKG_CFLAGS) $(LDFLAGS) -o $@ $^ $(PKG_LIBS)
+
+# test_integration needs server/chain.c for chain_parse_* functions
+$(TEST_INTEGRATION_BIN): $(TEST_INTEGRATION_SRC) server/chain.c $(COMMON_LIB)
 	@mkdir -p $(BUILD_DIR)
 	$(CC) $(CFLAGS) $(INCS) $(PKG_CFLAGS) $(LDFLAGS) -o $@ $^ $(PKG_LIBS)
 

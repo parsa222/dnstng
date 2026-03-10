@@ -27,7 +27,7 @@ static int roundtrip(uint32_t chan_mask, const uint8_t *data, size_t data_len)
     int                  wire_len;
     int                  unpacked;
 
-    channel_buf_init(&cb, chan_mask, "tunnel.example.com");
+    channel_buf_init(&cb, chan_mask, "example.com");
 
     packed = channel_pack(&cb, data, data_len);
     if (packed <= 0) {
@@ -35,7 +35,7 @@ static int roundtrip(uint32_t chan_mask, const uint8_t *data, size_t data_len)
     }
 
     wire_len = dns_build_response_ext(0x1234,
-                                       "test.tunnel.example.com",
+                                       "test.example.com",
                                        DNS_TYPE_TXT,
                                        &cb.resp,
                                        wire, sizeof(wire));
@@ -97,13 +97,13 @@ static void test_pack_unpack_addl(void)
     int                  unpacked;
 
     fill_seq(data, sizeof(data));
-    channel_buf_init(&cb, CHAN_ADDL_GLUE, "tunnel.example.com");
+    channel_buf_init(&cb, CHAN_ADDL_GLUE, "example.com");
 
     packed = channel_pack(&cb, data, sizeof(data));
     assert(packed > 0);
 
     wire_len = dns_build_response_ext(0xABCD,
-                                       "test.tunnel.example.com",
+                                       "test.example.com",
                                        DNS_TYPE_TXT,
                                        &cb.resp,
                                        wire, sizeof(wire));
@@ -146,13 +146,13 @@ static void test_multi_channel(void)
 
     fill_seq(data, sizeof(data));
     mask = CHAN_NAPTR | CHAN_CAA;
-    channel_buf_init(&cb, mask, "tunnel.example.com");
+    channel_buf_init(&cb, mask, "example.com");
 
     packed = channel_pack(&cb, data, sizeof(data));
     assert(packed > 0);
 
     wire_len = dns_build_response_ext(0x9999,
-                                       "test.tunnel.example.com",
+                                       "test.example.com",
                                        DNS_TYPE_TXT,
                                        &cb.resp,
                                        wire, sizeof(wire));
@@ -180,13 +180,13 @@ static void test_edns_channel(void)
     int                  unpacked;
 
     fill_seq(data, sizeof(data));
-    channel_buf_init(&cb, CHAN_EDNS_OPT, "tunnel.example.com");
+    channel_buf_init(&cb, CHAN_EDNS_OPT, "example.com");
 
     packed = channel_pack(&cb, data, sizeof(data));
     assert(packed > 0);
 
     wire_len = dns_build_response_ext(0x5555,
-                                       "test.tunnel.example.com",
+                                       "test.example.com",
                                        DNS_TYPE_TXT,
                                        &cb.resp,
                                        wire, sizeof(wire));

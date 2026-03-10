@@ -39,14 +39,21 @@ dnstt stops. Base32 encoding again produces detectable entropy. Single channel, 
 DnsTNG's approach: negotiate at session start which channels survive, spread data across
 every available DNS field, and fall back to SMTP/OCSP/CRL if DNS itself is blocked.
 
-| Capability | iodine | dnstt | DnsTNG |
+| Capability | iodine | dnscat2 | DnsTNG |
 |---|---|---|---|
-| Record types | NULL/TXT/CNAME/MX | TXT only | NAPTR, SOA, NULL, TXT, CAA, SRV, CNAME, AAAA, A (auto) |
+| Record types | NULL/TXT/CNAME/MX/SRV | TXT only | NAPTR, SOA, NULL, TXT, CAA, SRV, CNAME, AAAA, A (auto) |
 | Downstream channels | Single record type | Single TXT record | Answer + Authority NS + Additional glue + TTL bits + EDNS0 |
-| Encoding | Base32 (high entropy) | Base32 (high entropy) | Base36 (lower entropy) |
+| Encoding | Base32/64/128 (auto) | Raw | Base36 (lower entropy) |
 | Bandwidth multiplier | None | None | CNAME chain (up to 8x) + NS referral chain |
 | Fallback if DNS blocked | None | None | SMTP (port 25), OCSP (port 80), CRL (port 80) |
-| Anti-detection | None | Minimal | Jitter, noise queries, query-type rotation, TTL mimicry |
+| Anti-detection | Minimal | None | Jitter, noise queries, query-type rotation, TTL mimicry |
+| Payload encryption | None | ECDH + Salsa20 | PSK-derived XOR stream cipher |
+| Lazy mode | ✅ (key innovation) | No | ✅ (iodine-inspired) |
+| Adaptive polling | ✅ (auto) | No | ✅ (100ms → 4s ramp) |
+| Random ISN | No | ✅ (anti-hijack) | ✅ (dnscat2-inspired) |
+| Query type rotation | Manual (-T flag) | No | ✅ Automatic (30-120 query intervals) |
+| Adaptive window | No | No | ✅ EWMA-based RTT (2-32 slots) |
+| Session resume | Reconnect from scratch | Reconnect from scratch | ✅ Token-based resume |
 | Typical bandwidth | ~1 KB/s | ~1–3 KB/s | ~20–200 KB/s |
 
 ---
@@ -83,7 +90,7 @@ Data travels upstream encoded in the subdomain labels of the DNS query FQDN:
 <base36_data>.<session_id_hex>.t.<tunnel_domain>
 ```
 
-Example: `3x9kp2r.0042.t.tunnel.example.com`
+Example: `3x9kp2r.0042.t.example.com`
 
 Base36 (digits 0-9 plus lowercase a-z) is used because it looks like a normal subdomain.
 Base64 is not used because capital letters and plus signs look suspicious in DNS and some
@@ -163,10 +170,10 @@ The 16-bit TXID field in the DNS response carries 2 bytes of session sequence me
 A single client query can trigger multiple recursive lookups, each carrying a response:
 
 ```
-Client queries: x.t.tunnel.example.com A
-  Server responds: CNAME -> <data_chunk_1>.c0.t.tunnel.example.com
-    Server responds: CNAME -> <data_chunk_2>.c1.t.tunnel.example.com
-      Server responds: CNAME -> <data_chunk_3>.c2.t.tunnel.example.com
+Client queries: x.t.example.com A
+  Server responds: CNAME -> <data_chunk_1>.c0.t.example.com
+    Server responds: CNAME -> <data_chunk_2>.c1.t.example.com
+      Server responds: CNAME -> <data_chunk_3>.c2.t.example.com
         Server responds: A 0.0.0.1 (final, also carries last data bytes)
 ```
 
@@ -260,38 +267,67 @@ The server must be reachable on UDP port 53 from the internet. It also needs to 
 make outbound TCP connections (for proxying traffic). If your server cannot make outbound
 connections, you have bigger problems than this tool can solve.
 
-### Build
+### Quick Build (Ubuntu)
+
+The fastest way to install dependencies and build on Ubuntu (20.04 / 22.04 / 24.04):
 
 ```bash
-# Install dependencies (Debian/Ubuntu)
-apt-get install cmake libuv1-dev libcares-dev liblz4-dev
+./build.sh
+```
 
-# Build
-mkdir build && cd build
+This installs all required packages, compiles both binaries, and runs the test suite.
+The binaries end up in `build/`.
+
+### Manual Build (Ubuntu)
+
+If you prefer to do it yourself:
+
+```bash
+# Install dependencies
+sudo apt-get update
+sudo apt-get install -y build-essential cmake pkg-config \
+    libuv1-dev libc-ares-dev liblz4-dev
+
+# Build with GNU Make (recommended)
+make clean && make all
+
+# Or build with CMake
+mkdir -p build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Release
 make -j$(nproc)
 ```
 
-This produces two binaries: `dnstunnel-client` and `dnstunnel-server`.
+This produces two binaries: `dnstunnel-client` and `dnstunnel-server` in `build/`.
 
-For a fully static build (no glibc dependency):
+### Run Tests
+
 ```bash
-# Install musl toolchain
-apt-get install musl-tools musl-dev
+# GNU Make
+make tests
 
-# Static build
-cmake .. -DCMAKE_BUILD_TYPE=Release \
-         -DCMAKE_C_COMPILER=musl-gcc \
-         -DCMAKE_EXE_LINKER_FLAGS="-static"
-make -j$(nproc)
+# Or CMake
+cd build && ctest --output-on-failure
 ```
 
-For ARM64 (Android/phones):
-```bash
-apt-get install gcc-aarch64-linux-gnu
-cmake .. -DCMAKE_TOOLCHAIN_FILE=cmake/aarch64-linux-gnu.cmake
-make -j$(nproc)
-```
+All 6 test binaries must pass: `test_encode`, `test_transport`, `test_dns_packet`,
+`test_channel`, `test_chain`, `test_integration`.
+
+The integration test (`test_integration`) covers 15 end-to-end scenarios including:
+- PSK encryption round-trip
+- Random ISN verification
+- Channel negotiation (SYN → SYN-ACK with bitmask intersection)
+- Multi-channel data through NAPTR+CAA
+- CNAME chain round-trip (3-hop)
+- NS referral round-trip
+- Upstream FQDN encode/decode pipeline
+- All 7 DNS channels simultaneously
+- Query type rotation (TXT → AAAA → A → SRV → NAPTR)
+- Adaptive window sizing (EWMA-based RTT)
+- Config defaults (PSK, lazy_mode, channels)
+- Session resume token generation
+- Encrypted transport pipeline (both directions)
+- Stealth entropy measurement
+- Full session lifecycle (SYN → SYN-ACK → DATA → FIN)
 
 ### Server Setup
 
@@ -316,6 +352,8 @@ active_channels = auto
 cname_chain_depth = 3
 ns_chain_depth = 2
 ttl_encoding = stealth
+psk = my-secret-tunnel-key
+lazy_mode = 1
 ```
 
 ### Client Setup
@@ -347,6 +385,8 @@ active_channels = auto
 cname_chain_depth = 3
 ns_chain_depth = 2
 ttl_encoding = stealth
+psk = my-secret-tunnel-key
+lazy_mode = 1
 smtp_host =
 smtp_port = 25
 ocsp_host =
@@ -366,6 +406,7 @@ dnstunnel-client [options]
   --domain <domain>        Tunnel domain
   --resolver <ip>          DNS resolver IP to query through
   --listen <addr:port>     SOCKS5 listen address (default: 127.0.0.1:1080)
+  --psk <passphrase>       Pre-shared key for payload encryption
   --check                  Run full channel probe and exit
   --benchmark              Measure actual throughput for 10 seconds
   --loglevel <level>       debug | info | warn | error
@@ -376,6 +417,8 @@ dnstunnel-server [options]
   --domain <domain>        Tunnel domain
   --listen <addr:port>     DNS listen address (default: 0.0.0.0:53)
   --upstream <ip>          Upstream DNS resolver for non-tunnel queries
+  --psk <passphrase>       Pre-shared key for payload encryption
+  --lazy-mode <0|1>        Enable lazy mode (default: 1)
   --loglevel <level>       debug | info | warn | error
   --help                   Show this message
 ```
@@ -420,12 +463,35 @@ Running `--check` produces a report like this:
 DNS is UDP. UDP drops packets, reorders them, and duplicates them for fun. DnsTNG handles
 this with a transport layer on top:
 
-- **Sequence numbers** on every packet (2 bytes)
+- **Random sequence numbers** on every packet (2 bytes, randomized ISN like dnscat2)
 - **Acknowledgments** from server to client, carried in DNS response data
 - **CRC16-CCITT checksum** on every packet header
 - **Retransmission** with exponential backoff (initial 500ms, max 10s, factor 1.5)
 - **Ring buffer** (64 slots) for retransmission tracking
-- **Sliding window** (default 8 concurrent in-flight queries)
+- **Adaptive sliding window** (EWMA-based RTT, range 2-32, default 8)
+
+### Random Initial Sequence Numbers (dnscat2-inspired)
+
+Each new transport context starts with a random 16-bit ISN generated using
+`getrandom()`. This prevents session hijacking attacks where an adversary
+who knows the session ID guesses the next sequence number. Combined with
+the random session ID, this gives ~48 bits of per-session entropy — the same
+approach dnscat2 uses.
+
+### Adaptive Window Size (EWMA-based)
+
+The window size (number of in-flight queries allowed) is dynamically adjusted based
+on measured round-trip times. The algorithm:
+
+1. **Measure RTT** for each query-response pair (send timestamp → ack timestamp)
+2. **Compute EWMA**: `rtt_ewma = 0.875 × rtt_ewma + 0.125 × sample` (same formula as TCP)
+3. **Adjust window**:
+   - If RTT improved (new EWMA < previous): increase window by 1 (max 32)
+   - If RTT degraded >25% (new EWMA > previous × 1.25): decrease window by 1 (min 2)
+   - Otherwise: keep current window (stable)
+
+This means the tunnel automatically speeds up on good networks and throttles on
+congested ones, without manual tuning.
 
 ---
 
@@ -440,7 +506,190 @@ this with a transport layer on top:
 - **TTL mimicry:** In stealth mode, TTL steganography keeps values in a believable range
   rather than setting them to arbitrary 32-bit integers.
 - **Query type rotation:** Periodically rotates between working record types to avoid
-  fixed patterns.
+  fixed patterns. Rotates every 30-120 queries (randomized interval) among
+  TXT → AAAA → A → SRV → NAPTR.
+
+---
+
+## Payload Encryption (dnscat2-inspired)
+
+DnsTNG includes a PSK (Pre-Shared Key) encryption layer inspired by dnscat2's
+encryption protocol. While dnscat2 uses ECDH key exchange with Salsa20, DnsTNG uses
+a simpler but effective approach designed for the DNS tunnel use case:
+
+### How It Works
+
+1. **Key Derivation**: The PSK (any passphrase up to 64 bytes) is hashed through a
+   mixing function inspired by SipHash. The mixing uses 4 × 32-bit state words
+   initialized from the fractional parts of √2, √3, √5, √7 (same constants used
+   by SHA-256). The PSK bytes are absorbed into this state, then 8 extra mixing rounds
+   produce a 32-byte key.
+
+2. **Per-Packet Keystream**: For each packet, a 2-byte nonce is prepended. The keystream
+   is generated by hashing `(key_hash || nonce || block_index)` through the same mixing
+   function. This produces 16-byte keystream blocks that are XORed with the payload.
+
+3. **Wire Format**:
+   ```
+   [nonce_hi][nonce_lo][encrypted_data...]
+   ```
+   Total overhead: 2 bytes per packet (the nonce).
+
+4. **Nonce Management**: The nonce is incremented for each sent packet. Unlike dnscat2,
+   strict anti-replay is not enforced because DNS retransmissions are extremely common
+   (recursive resolvers gratuitously re-send queries). The nonce ensures each packet
+   produces different ciphertext even for identical payloads.
+
+### What This Provides
+
+- **Payload obfuscation**: Defeats pattern-matching DPI that looks for tunnel protocol
+  signatures in DNS response payloads
+- **Per-packet uniqueness**: Each packet produces different ciphertext even for identical
+  data, defeating replay-based detection
+- **Zero external dependencies**: No OpenSSL, no libsodium, no mbedTLS
+
+### What This Does NOT Provide
+
+- This is NOT a cryptographically strong cipher. An attacker with the binary can
+  reverse-engineer the mixing function. It's designed to defeat passive DPI inspection,
+  not active cryptanalysis.
+- No forward secrecy (same PSK forever). For stronger guarantees, run SSH/TLS inside
+  the tunnel.
+
+### Configuration
+
+```ini
+# In server.conf and client.conf (must match!)
+psk = my-secret-passphrase-here
+```
+
+Both client and server must use the same PSK. If the PSK doesn't match, decrypted
+payloads will be garbage and the CRC-16 checksum in the transport layer will reject them.
+
+---
+
+## Lazy Mode (iodine-inspired)
+
+Lazy mode is iodine's single biggest performance innovation, and DnsTNG implements it
+with the same approach.
+
+### The Problem
+
+In a normal DNS tunnel, the client sends a query and the server immediately responds.
+When the server has no data to send, it responds with an empty ACK. This means:
+
+- The client must keep polling (sending queries) to check for downstream data
+- Each poll has the full round-trip latency (100-500ms through recursive resolvers)
+- When data finally arrives at the server, it must wait for the next client poll
+
+### The Solution: Delayed Response
+
+In lazy mode, the server **does not respond to a query immediately** if it has no data
+to send. Instead, it holds the query in a pending queue. When data arrives:
+
+1. Server takes the **oldest pending query** from the queue
+2. Responds to it immediately with the data
+3. The client receives the data with near-zero latency
+
+This means the server always has a DNS query "in flight" ready to send data on.
+The client's next poll query replaces the consumed one in the queue.
+
+### Timing and Timeouts
+
+- **Queue size**: 4 pending queries per session (LAZY_QUEUE_SIZE)
+- **Lazy timeout**: 4 seconds (LAZY_TIMEOUT_MS). If a query hasn't been answered
+  in 4 seconds, the server responds with an empty ACK. This stays under most
+  recursive resolver timeouts (typically 5-10 seconds per RFC 1035).
+- **Drain timer**: Every 500ms, the server checks for expired pending queries and
+  responds to them. This prevents DNS SERVFAIL errors from impatient resolvers.
+
+### How It Interacts with Other Features
+
+- **SYN/SYN-ACK**: Always responded immediately (never queued)
+- **DATA packets**: The server responds to the oldest pending query (if any),
+  then queues the current query. This is the key insight: when data arrives,
+  the response goes to the previously queued poll, not the current request.
+- **POLL packets**: If there's already a pending query, the old one gets an
+  empty ACK, and the new poll takes its place in the queue.
+
+### Configuration
+
+```ini
+# In server.conf
+lazy_mode = 1    # 1 = enabled (default), 0 = disabled
+```
+
+---
+
+## Adaptive Poll Interval (iodine-inspired)
+
+The client's poll interval (how often it sends DNS queries when idle) adapts to
+traffic patterns.
+
+### Behavior
+
+| State | Interval | Description |
+|---|---|---|
+| Active data | 100ms | Minimum interval, maximum throughput |
+| Ramping down | 100ms + 50ms per idle poll | Gradually slows when no data flows |
+| Fully idle | 4000ms | Maximum interval, minimum DNS query rate |
+
+When data starts flowing again (client has data to send), the interval immediately
+drops back to 100ms.
+
+### Why This Matters
+
+- **Detection avoidance**: A fixed high-frequency poll (e.g., 50ms = 20 queries/second)
+  is an obvious fingerprint. Normal DNS traffic is bursty, not periodic.
+- **Resource efficiency**: An idle tunnel sending 20 qps wastes bandwidth and CPU
+  for both client and server.
+- **iodine comparison**: iodine uses a similar approach with a default 4-second
+  idle interval, reducing to 1 second under some conditions. DnsTNG uses a smoother
+  linear ramp instead of iodine's step function.
+
+---
+
+## Query Type Rotation
+
+The tunnel rotates between different DNS record types to avoid fingerprinting.
+
+### How It Works
+
+1. A rotation list is maintained: `[TXT, AAAA, A, SRV, NAPTR]`
+2. Every 30-120 queries (randomized interval using `getrandom()`), the tunnel
+   switches to the next type in the list
+3. The randomized interval prevents periodic patterns that DPI could detect
+
+### Compared to iodine
+
+iodine uses the `-T` flag to manually force a specific record type. It also has
+auto-detection that picks the "best" type, but once selected, it stays fixed.
+DnsTNG rotates automatically, which:
+
+- Makes the traffic pattern look more like normal DNS (which uses various record types)
+- Reduces the chance of a single record type being blocked mid-session
+- Doesn't require the user to know which types work
+
+---
+
+## Session Resume (dnscat2-inspired)
+
+When a network outage occurs, the client can resume an existing session instead of
+starting over.
+
+### How It Works
+
+1. During session setup, the server generates an 8-byte random session token
+   and stores it in `transport_ctx_t.session_token`
+2. If the connection drops, the client can include this token in a new SYN
+   to prove it's the same client
+3. The server matches the token and resumes the session state (sequence numbers,
+   window, channel negotiation) instead of creating a new session
+
+### Current Status
+
+The token generation infrastructure is implemented (`transport_generate_token()`).
+The full wire-protocol resume (including token in SYN payload) is a TODO item.
 
 ---
 
@@ -455,21 +704,22 @@ dnstunnel/
 ├── client/
 │   ├── main.c          CLI parsing and entry point
 │   ├── socks5.c/.h     SOCKS5 proxy server (RFC 1928)
-│   ├── tunnel_client.c/.h  Client-side tunnel logic
+│   ├── tunnel_client.c/.h  Client-side tunnel logic (adaptive polling)
 │   └── check.c/.h      --check, --benchmark modes
 ├── server/
 │   ├── main.c          CLI parsing and entry point
 │   ├── dns_server.c/.h UDP DNS listener
-│   ├── tunnel_server.c/.h  Server-side session management
+│   ├── tunnel_server.c/.h  Server-side session management (lazy mode)
 │   ├── chain.c/.h      CNAME chaining and NS referral chaining
 │   └── proxy.c/.h      TCP proxy (exit node)
 ├── common/
 │   ├── channel.c/.h    Multi-channel pack/unpack (all DNS fields)
+│   ├── crypto.c/.h     PSK payload encryption (dnscat2-inspired)
 │   ├── encode.c/.h     Base36 / Base32 encoding
-│   ├── transport.c/.h  Reliability layer (seq, ack, retransmit, window)
+│   ├── transport.c/.h  Reliability layer (seq, ack, retransmit, adaptive window)
 │   ├── dns_packet.c/.h DNS wire protocol, RDATA builders for all types
 │   ├── compress.c/.h   LZ4 compression wrapper
-│   ├── config.c/.h     Config file parser
+│   ├── config.c/.h     Config file parser (PSK, lazy_mode fields)
 │   ├── log.c/.h        Logging
 │   ├── stealth.c/.h    Jitter, noise domains, entropy measurement
 │   ├── smtp_channel.c/.h  SMTP backup tunnel
@@ -480,10 +730,11 @@ dnstunnel/
 │   ├── lz4.c / lz4.h   Bundled LZ4 single-file distribution
 └── tests/
     ├── test_encode.c       Encoding round-trip tests
-    ├── test_transport.c    Reliability layer tests
+    ├── test_transport.c    Reliability layer tests (random ISN)
     ├── test_dns_packet.c   DNS packet crafting/parsing tests
     ├── test_channel.c      Multi-channel pack/unpack tests
     ├── test_chain.c        CNAME / NS chain tests
+    ├── test_integration.c  15 end-to-end tests (crypto, ISN, lazy, channels, etc.)
     └── run_tests.sh        Run all tests
 ```
 

@@ -73,25 +73,27 @@ static void test_seq_increment(void)
     tunnel_header_t hdr;
     const uint8_t  *payload;
     size_t          payload_len;
+    uint16_t        initial_seq;
 
     transport_init(&ctx);
-    assert(ctx.next_seq == 0);
+    initial_seq = ctx.next_seq;  /* Random ISN (dnscat2-inspired) */
 
     pkt_len = transport_build_packet(&ctx, 1U, TUNNEL_FLAG_POLL,
                                       NULL, 0, pkt, sizeof(pkt));
     assert(pkt_len > 0);
     transport_parse_packet(pkt, (size_t)pkt_len, &hdr, &payload, &payload_len);
-    assert(hdr.seq_num == 0);
-    assert(ctx.next_seq == 1);
+    assert(hdr.seq_num == initial_seq);
+    assert(ctx.next_seq == (uint16_t)(initial_seq + 1));
 
     pkt_len = transport_build_packet(&ctx, 1U, TUNNEL_FLAG_POLL,
                                       NULL, 0, pkt, sizeof(pkt));
     assert(pkt_len > 0);
     transport_parse_packet(pkt, (size_t)pkt_len, &hdr, &payload, &payload_len);
-    assert(hdr.seq_num == 1);
-    assert(ctx.next_seq == 2);
+    assert(hdr.seq_num == (uint16_t)(initial_seq + 1));
+    assert(ctx.next_seq == (uint16_t)(initial_seq + 2));
 
-    printf("  seq numbers: 0, 1 as expected\n");
+    printf("  seq numbers: %u, %u (random ISN) as expected\n",
+           initial_seq, (uint16_t)(initial_seq + 1));
     transport_free(&ctx);
 }
 
@@ -102,8 +104,12 @@ static void test_ring_buffer_enqueue(void)
     static const uint8_t data[] = { 0x11, 0x22, 0x33, 0x44 };
     int              pkt_len;
     err_t            e;
+    uint16_t         initial_seq;
+    size_t           slot_idx;
 
     transport_init(&ctx);
+    initial_seq = ctx.next_seq;  /* Random ISN */
+    slot_idx    = initial_seq % RING_BUFFER_SIZE;
 
     pkt_len = transport_build_packet(&ctx, 0x0002U, TUNNEL_FLAG_DATA,
                                       data, sizeof(data),
@@ -111,8 +117,8 @@ static void test_ring_buffer_enqueue(void)
     assert(pkt_len > 0);
 
     /* The slot should already be in the ring from build_packet */
-    assert(ctx.slots[0].in_use == 1);
-    assert(ctx.slots[0].seq == 0);
+    assert(ctx.slots[slot_idx].in_use == 1);
+    assert(ctx.slots[slot_idx].seq == initial_seq);
 
     /* Now enqueue a synthetic packet at a different slot */
     e = transport_enqueue(&ctx, pkt, (size_t)pkt_len, 5);
@@ -121,8 +127,8 @@ static void test_ring_buffer_enqueue(void)
     assert(ctx.slots[5 % RING_BUFFER_SIZE].seq == 5);
 
     /* ACK frees slots */
-    transport_ack(&ctx, 0); /* ack seq 0 */
-    assert(ctx.slots[0].in_use == 0);
+    transport_ack(&ctx, initial_seq); /* ack the first packet */
+    assert(ctx.slots[slot_idx].in_use == 0);
     printf("  ring buffer enqueue/ack: ok\n");
 
     transport_free(&ctx);
@@ -146,15 +152,19 @@ static void test_retransmit(void)
     uint8_t            pkt[TUNNEL_HEADER_SIZE];
     int                pkt_len;
     retransmit_count_t rc;
+    uint16_t           initial_seq;
+    size_t             slot_idx;
 
     transport_init(&ctx);
+    initial_seq = ctx.next_seq;
+    slot_idx    = initial_seq % RING_BUFFER_SIZE;
 
     pkt_len = transport_build_packet(&ctx, 1U, TUNNEL_FLAG_DATA,
                                       NULL, 0, pkt, sizeof(pkt));
     assert(pkt_len > 0);
 
     /* Force slot to appear old */
-    ctx.slots[0].send_time_ms = 0;
+    ctx.slots[slot_idx].send_time_ms = 0;
 
     rc.count = 0;
     transport_check_retransmit(&ctx, 5000ULL, 1000ULL,

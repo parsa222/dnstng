@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include "util.h"
+#include "crypto.h"
 
 /* --- packet flags --- */
 #define TUNNEL_FLAG_SYN  0x01
@@ -34,6 +35,9 @@ typedef struct {
 #define RING_BUFFER_SIZE    64
 #define WINDOW_SIZE_DEFAULT 8
 
+/* Session resume token size (dnscat2-inspired) */
+#define SESSION_TOKEN_SIZE  8
+
 typedef struct {
     uint8_t  data[TUNNEL_HEADER_SIZE + TUNNEL_MAX_PAYLOAD];
     size_t   len;
@@ -44,11 +48,22 @@ typedef struct {
 } ring_slot_t;
 
 typedef struct {
-    ring_slot_t slots[RING_BUFFER_SIZE];
-    uint16_t    next_seq;
-    uint16_t    ack_seq;
-    uint16_t    recv_seq;
-    uint32_t    active_channels;  /* bitmask of CHAN_* from dns_packet.h */
+    ring_slot_t  slots[RING_BUFFER_SIZE];
+    uint16_t     next_seq;
+    uint16_t     ack_seq;
+    uint16_t     recv_seq;
+    uint32_t     active_channels;   /* bitmask of CHAN_* from dns_packet.h */
+    crypto_ctx_t crypto;            /* PSK encryption context */
+    uint8_t      session_token[SESSION_TOKEN_SIZE]; /* for session resume */
+    int          has_session_token;  /* 1 if token is set */
+    /* Adaptive window size (iodine-inspired) */
+    int          window_size;       /* current window (2..32) */
+    uint64_t     rtt_ewma_us;      /* EWMA of RTT in microseconds */
+    uint64_t     last_send_time_us; /* timestamp of last send */
+    /* Query type rotation (TODO #10) */
+    int          query_type_idx;    /* current index in rotation list */
+    int          queries_on_type;   /* queries sent with current type */
+    int          rotate_interval;   /* queries before rotation (30-120) */
 } transport_ctx_t;
 
 err_t    transport_init(transport_ctx_t *ctx);
@@ -70,3 +85,16 @@ void     transport_check_retransmit(
              void *userdata);
 void     transport_ack(transport_ctx_t *ctx, uint16_t ack_seq);
 uint64_t get_time_ms(void);
+
+/* Initialize transport with encryption (PSK). If psk is NULL, no encryption. */
+void     transport_set_psk(transport_ctx_t *ctx,
+                           const uint8_t *psk, size_t psk_len);
+
+/* Get the DNS query type for the next query (rotates among types) */
+int      transport_next_query_type(transport_ctx_t *ctx);
+
+/* Update RTT measurement and adaptive window */
+void     transport_update_rtt(transport_ctx_t *ctx, uint64_t rtt_us);
+
+/* Generate / set session resume token */
+void     transport_generate_token(transport_ctx_t *ctx);

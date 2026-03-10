@@ -335,3 +335,48 @@ err_t dns_server_respond(dns_server_t *srv, uint16_t query_id,
 
     return ERR_OK;
 }
+
+/* ------------------------------------------------------------------ */
+/* Send a pre-built DNS packet                                          */
+/* ------------------------------------------------------------------ */
+
+err_t dns_server_send_raw(dns_server_t *srv, const uint8_t *buf, size_t len,
+                           const struct sockaddr *to, socklen_t to_len)
+{
+    uint8_t       *rbuf;
+    uv_udp_send_t *sreq;
+    uv_buf_t       ubuf;
+
+    (void)to_len;
+
+    if (!srv || !buf || len == 0 || !to) {
+        return ERR_INVAL;
+    }
+
+    rbuf = (uint8_t *)malloc(len);
+    if (!rbuf) {
+        return ERR_NOMEM;
+    }
+    memcpy(rbuf, buf, len);
+
+    sreq = (uv_udp_send_t *)malloc(sizeof(uv_udp_send_t));
+    if (!sreq) {
+        free(rbuf);
+        return ERR_NOMEM;
+    }
+
+    sreq->data = rbuf;
+    ubuf.base  = (char *)rbuf;
+    ubuf.len   = len;
+
+    {
+        int sr = uv_udp_send(sreq, &srv->udp, &ubuf, 1, to, send_cb);
+        if (sr < 0) {
+            free(rbuf);
+            free(sreq);
+            return ERR_IO;
+        }
+    }
+
+    return ERR_OK;
+}

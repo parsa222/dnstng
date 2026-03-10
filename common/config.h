@@ -23,6 +23,9 @@ struct client_config_s {
     int           cname_chain_depth; /* 0=disabled, 1-8 */
     int           ns_chain_depth;    /* 0=disabled, 1-4 */
     int           ttl_encoding;      /* 0=disabled, 1=stealth, 2=full */
+    char          psk[64];           /* pre-shared key for encryption */
+    size_t        psk_len;           /* 0 = no encryption */
+    int           lazy_mode;         /* 1 = iodine-style lazy mode */
     char          smtp_host[64];     /* backup SMTP host */
     uint16_t      smtp_port;         /* backup SMTP port (default 25) */
     char          ocsp_host[64];     /* backup OCSP host */
@@ -41,6 +44,9 @@ struct server_config_s {
     int         cname_chain_depth;
     int         ns_chain_depth;
     int         ttl_encoding;
+    char        psk[64];            /* pre-shared key for encryption */
+    size_t      psk_len;            /* 0 = no encryption */
+    int         lazy_mode;          /* 1 = iodine-style lazy mode */
 };
 
 void  config_client_defaults(client_config_t *cfg);

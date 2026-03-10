@@ -84,7 +84,7 @@ static void test_build_response_and_parse(void)
     ans.rdata_len = sizeof(rdata);
     ans.ttl       = 60;
 
-    len = dns_build_response(id, "data.t.tunnel.example.com", DNS_TYPE_TXT,
+    len = dns_build_response(id, "data.t.example.com", DNS_TYPE_TXT,
                               &ans, 1, buf, sizeof(buf));
     assert(len > 12);
     printf("  response len: %d\n", len);
@@ -159,7 +159,7 @@ static void test_labels_encoding(void)
     uint8_t buf[512];
     int     len;
 
-    len = dns_build_query(1, "a.b.c.d.e.f.g.tunnel.example.com",
+    len = dns_build_query(1, "a.b.c.d.e.f.g.example.com",
                            DNS_TYPE_NULL_, 0, 0, buf, sizeof(buf));
     assert(len > 12);
     printf("  multi-label FQDN query len: %d: ok\n", len);
