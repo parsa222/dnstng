@@ -1,5 +1,7 @@
 #include "transport.h"
 #include "util.h"
+#include "stealth.h"
+#include "dns_packet.h"
 #include <string.h>
 #include <time.h>
 
@@ -15,6 +17,19 @@ uint64_t get_time_ms(void)
 }
 
 /* ------------------------------------------------------------------ */
+/* Query type rotation table (like iodine's -T option)                  */
+/* ------------------------------------------------------------------ */
+
+static const uint16_t QUERY_TYPES[] = {
+    DNS_TYPE_TXT,   /* Most bandwidth */
+    DNS_TYPE_AAAA,  /* Reasonable bandwidth */
+    DNS_TYPE_A,     /* Low bandwidth but always works */
+    DNS_TYPE_SRV,   /* Good bandwidth, sometimes filtered */
+    DNS_TYPE_NAPTR, /* Often allowed */
+};
+#define NUM_QUERY_TYPES (sizeof(QUERY_TYPES) / sizeof(QUERY_TYPES[0]))
+
+/* ------------------------------------------------------------------ */
 /* Lifecycle                                                            */
 /* ------------------------------------------------------------------ */
 
@@ -24,6 +39,25 @@ err_t transport_init(transport_ctx_t *ctx)
         return ERR_INVAL;
     }
     memset(ctx, 0, sizeof(*ctx));
+
+    /* Random ISN (dnscat2-inspired: randomize to prevent session hijacking) */
+    ctx->next_seq = (uint16_t)(stealth_rand32() & 0xFFFFU);
+    ctx->recv_seq = 0;
+    ctx->ack_seq  = 0;
+
+    /* Adaptive window defaults */
+    ctx->window_size     = WINDOW_SIZE_DEFAULT;
+    ctx->rtt_ewma_us     = 200000; /* initial estimate: 200ms */
+    ctx->last_send_time_us = 0;
+
+    /* Query type rotation defaults */
+    ctx->query_type_idx   = 0;
+    ctx->queries_on_type  = 0;
+    ctx->rotate_interval  = 50; /* rotate every 50 queries */
+
+    /* No crypto by default */
+    crypto_init(&ctx->crypto, NULL, 0);
+
     return ERR_OK;
 }
 
@@ -263,4 +297,83 @@ void transport_check_retransmit(
             slot->retransmit_count++;
         }
     }
+}
+
+/* ------------------------------------------------------------------ */
+/* PSK encryption setup                                                 */
+/* ------------------------------------------------------------------ */
+
+void transport_set_psk(transport_ctx_t *ctx,
+                       const uint8_t *psk, size_t psk_len)
+{
+    if (!ctx) {
+        return;
+    }
+    crypto_init(&ctx->crypto, psk, psk_len);
+}
+
+/* ------------------------------------------------------------------ */
+/* Query type rotation (TODO #10, iodine-inspired)                      */
+/* ------------------------------------------------------------------ */
+
+int transport_next_query_type(transport_ctx_t *ctx)
+{
+    uint16_t qtype;
+
+    if (!ctx) {
+        return DNS_TYPE_TXT;
+    }
+
+    qtype = QUERY_TYPES[ctx->query_type_idx % NUM_QUERY_TYPES];
+    ctx->queries_on_type++;
+
+    if (ctx->queries_on_type >= ctx->rotate_interval) {
+        ctx->query_type_idx = (ctx->query_type_idx + 1) % (int)NUM_QUERY_TYPES;
+        ctx->queries_on_type = 0;
+        /* Randomize the next rotation interval (30-120 queries) */
+        ctx->rotate_interval = 30 + (int)(stealth_rand32() % 91U);
+    }
+
+    return (int)qtype;
+}
+
+/* ------------------------------------------------------------------ */
+/* Adaptive window size (TODO #7, iodine-inspired)                      */
+/* ------------------------------------------------------------------ */
+
+void transport_update_rtt(transport_ctx_t *ctx, uint64_t rtt_us)
+{
+    uint64_t prev;
+
+    if (!ctx || rtt_us == 0) {
+        return;
+    }
+
+    prev = ctx->rtt_ewma_us;
+
+    /* EWMA: rtt_ewma = 0.875 * rtt_ewma + 0.125 * sample */
+    ctx->rtt_ewma_us = (prev * 7 + rtt_us) / 8;
+
+    /* Adjust window based on RTT trend */
+    if (ctx->rtt_ewma_us < prev && ctx->window_size < 32) {
+        /* RTT improved → increase window */
+        ctx->window_size++;
+    } else if (ctx->rtt_ewma_us > prev + prev / 4 && ctx->window_size > 2) {
+        /* RTT degraded significantly → decrease window */
+        ctx->window_size--;
+    }
+    /* else: stable, no change */
+}
+
+/* ------------------------------------------------------------------ */
+/* Session resume token (dnscat2-inspired)                              */
+/* ------------------------------------------------------------------ */
+
+void transport_generate_token(transport_ctx_t *ctx)
+{
+    if (!ctx) {
+        return;
+    }
+    stealth_random_bytes(ctx->session_token, SESSION_TOKEN_SIZE);
+    ctx->has_session_token = 1;
 }

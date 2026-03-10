@@ -47,6 +47,8 @@ void config_client_defaults(client_config_t *cfg)
     cfg->smtp_port        = 25;
     cfg->ocsp_port        = 80;
     cfg->crl_port         = 80;
+    cfg->psk_len          = 0;  /* no encryption by default */
+    cfg->lazy_mode        = 1;  /* iodine-style lazy mode on by default */
 }
 
 void config_server_defaults(server_config_t *cfg)
@@ -61,6 +63,8 @@ void config_server_defaults(server_config_t *cfg)
     cfg->cname_chain_depth = 3;
     cfg->ns_chain_depth    = 2;
     cfg->ttl_encoding      = 1;
+    cfg->psk_len           = 0;  /* no encryption by default */
+    cfg->lazy_mode         = 1;  /* iodine-style lazy mode on by default */
 }
 
 /* Generic key=value parser.  Calls set_kv for each pair found.
@@ -159,6 +163,16 @@ static void client_kv(const char *key, const char *val, void *ud)
         strncpy(cfg->crl_host, val, sizeof(cfg->crl_host) - 1);
     } else if (strcmp(key, "crl_port") == 0) {
         cfg->crl_port = (uint16_t)atoi(val);
+    } else if (strcmp(key, "psk") == 0) {
+        size_t vlen = strlen(val);
+        if (vlen > sizeof(cfg->psk) - 1) {
+            vlen = sizeof(cfg->psk) - 1;
+        }
+        memcpy(cfg->psk, val, vlen);
+        cfg->psk[vlen] = '\0';
+        cfg->psk_len = vlen;
+    } else if (strcmp(key, "lazy_mode") == 0) {
+        cfg->lazy_mode = atoi(val);
     }
 }
 
@@ -192,6 +206,16 @@ static void server_kv(const char *key, const char *val, void *ud)
         cfg->ns_chain_depth = atoi(val);
     } else if (strcmp(key, "ttl_encoding") == 0) {
         cfg->ttl_encoding = atoi(val);
+    } else if (strcmp(key, "psk") == 0) {
+        size_t vlen = strlen(val);
+        if (vlen > sizeof(cfg->psk) - 1) {
+            vlen = sizeof(cfg->psk) - 1;
+        }
+        memcpy(cfg->psk, val, vlen);
+        cfg->psk[vlen] = '\0';
+        cfg->psk_len = vlen;
+    } else if (strcmp(key, "lazy_mode") == 0) {
+        cfg->lazy_mode = atoi(val);
     }
 }
 
