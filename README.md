@@ -48,12 +48,12 @@ every available DNS field, and fall back to SMTP/OCSP/CRL if DNS itself is block
 | Fallback if DNS blocked | None | None | SMTP (port 25), OCSP (port 80), CRL (port 80) |
 | Anti-detection | Minimal | None | Jitter, noise queries, query-type rotation, TTL mimicry |
 | Payload encryption | None | ECDH + Salsa20 | PSK-derived XOR stream cipher |
-| Lazy mode | ✅ (key innovation) | No | ✅ (iodine-inspired) |
-| Adaptive polling | ✅ (auto) | No | ✅ (100ms → 4s ramp) |
-| Random ISN | No | ✅ (anti-hijack) | ✅ (dnscat2-inspired) |
-| Query type rotation | Manual (-T flag) | No | ✅ Automatic (30-120 query intervals) |
-| Adaptive window | No | No | ✅ EWMA-based RTT (2-32 slots) |
-| Session resume | Reconnect from scratch | Reconnect from scratch | ✅ Token-based resume |
+| Lazy mode |  (key innovation) | No |  (iodine-inspired) |
+| Adaptive polling |  (auto) | No |  (100ms → 4s ramp) |
+| Random ISN | No |  (anti-hijack) |  (dnscat2-inspired) |
+| Query type rotation | Manual (-T flag) | No |  Automatic (30-120 query intervals) |
+| Adaptive window | No | No |  EWMA-based RTT (2-32 slots) |
+| Session resume | Reconnect from scratch | Reconnect from scratch |  Token-based resume |
 | Typical bandwidth | ~1 KB/s | ~1–3 KB/s | ~20–200 KB/s |
 
 ---
