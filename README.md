@@ -107,6 +107,107 @@ This is where it gets interesting. A single DNS response can carry data in multi
 simultaneously. Instead of the traditional "put everything in a TXT record and hope for 255 bytes",
 DnsTNG uses every available container:
 
+#### DNS Packet Anatomy — Where Your Data Hides
+
+The following diagram shows a complete DNS response packet with every field that DnsTNG uses
+to carry tunnel data. Fields marked with `◄── DATA` carry hidden payload bytes.
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│                        DNS HEADER (12 bytes)                         │
+├────────────────────┬─────────────────────────────────────────────────┤
+│  Transaction ID    │ 0xA3F1                           ◄── DATA (2B) │
+│  (16 bits)         │ Carries session sequence metadata               │
+├────────────────────┼─────────────────────────────────────────────────┤
+│  Flags             │ 0x8180 (standard response, no error)            │
+│  QD/AN/NS/AR count │ QD=1  AN=3  NS=2  AR=5                         │
+└────────────────────┴─────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────┐
+│                    QUESTION SECTION (1 record)                        │
+├──────────────────────────────────────────────────────────────────────┤
+│  QNAME: 3x9kp2r.0042.t.tunnel.example.com                           │
+│         ^^^^^^^^                                                     │
+│         Upstream data (base36-encoded in subdomain labels)           │
+│  QTYPE: NAPTR    QCLASS: IN                                         │
+└──────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────┐
+│                    ANSWER SECTION (3 NAPTR records)                   │
+├──────────────────────────────────────────────────────────────────────┤
+│  Record 1: tunnel.example.com  NAPTR                                 │
+│  ┌──────────────────────────────────────────────────────────────┐    │
+│  │  TTL: 0x00A1B2C3                              ◄── DATA (3B) │    │
+│  │       ~~^^^^^^^^                                             │    │
+│  │       Upper 8 bits kept low (looks normal)                   │    │
+│  │       Lower 24 bits = 3 bytes of hidden data                 │    │
+│  ├──────────────────────────────────────────────────────────────┤    │
+│  │  Order: 10    Preference: 100                                │    │
+│  │  Flags: "u"   Service: "sip+E2U"                             │    │
+│  │  Regexp:  "<3-byte frag header><~200 bytes>    ◄── DATA"     │    │
+│  │  Replace: "<3-byte frag header><~200 bytes>    ◄── DATA"     │    │
+│  │           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^                  │    │
+│  │           [offset_hi][offset_lo][frag_len][payload...]        │    │
+│  └──────────────────────────────────────────────────────────────┘    │
+│  Record 2: (same structure, ~500 more bytes)         ◄── DATA       │
+│  Record 3: (same structure, ~500 more bytes)         ◄── DATA       │
+│                                                                      │
+│  Total answer section: ~1500 data bytes + 9 TTL-stego bytes          │
+└──────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────┐
+│                    AUTHORITY SECTION (2 NS records)                   │
+├──────────────────────────────────────────────────────────────────────┤
+│  Record 1:                                                           │
+│    NAME: tunnel.example.com                                          │
+│    TYPE: NS                                                          │
+│    TTL:  0x00112233                                   ◄── DATA (3B) │
+│    RDATA: 7kp2r9x4m.ns0.tunnel.example.com           ◄── DATA      │
+│            ^^^^^^^^^^                                                │
+│            Base36-encoded data chunk in NS name labels               │
+│                                                                      │
+│  Record 2:                                                           │
+│    RDATA: a3b5c7d9.ns1.tunnel.example.com             ◄── DATA      │
+│    TTL:   0x00445566                                  ◄── DATA (3B) │
+│                                                                      │
+│  Total authority section: ~400 data bytes + 6 TTL-stego bytes        │
+└──────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────┐
+│                    ADDITIONAL SECTION (5 records)                     │
+├──────────────────────────────────────────────────────────────────────┤
+│  Glue A records (4 records):                                         │
+│    ns0.tunnel.example.com  A  0xDE.0xAD.0xBE.0xEF    ◄── DATA (4B) │
+│    ns1.tunnel.example.com  A  0xCA.0xFE.0xBA.0xBE    ◄── DATA (4B) │
+│    ns2.tunnel.example.com  A  0x12.0x34.0x56.0x78    ◄── DATA (4B) │
+│    ns3.tunnel.example.com  A  0x9A.0xBC.0xDE.0xF0    ◄── DATA (4B) │
+│    (IP addresses ARE the data — raw binary)                          │
+│    TTL per record:                                    ◄── DATA (3B) │
+│                                                                      │
+│  EDNS0 OPT record (1 record):                                       │
+│  ┌──────────────────────────────────────────────────────────────┐    │
+│  │  NAME: . (root)   TYPE: OPT (41)   UDP size: 4096           │    │
+│  │  Option Code: 65001 (private/experimental)                   │    │
+│  │  Option Data: <variable length binary>         ◄── DATA      │    │
+│  │               Raw tunnel payload bytes                       │    │
+│  └──────────────────────────────────────────────────────────────┘    │
+│                                                                      │
+│  Total additional section: 16 bytes (glue) + EDNS0 + 12 TTL-stego   │
+└──────────────────────────────────────────────────────────────────────┘
+
+Summary: one DNS response, ~2000+ data bytes hidden across all fields
+```
+
+**What the recursive resolver sees:** A perfectly valid DNS response with NAPTR records,
+NS delegation, glue records, and an EDNS0 extension. Every field conforms to the DNS RFC.
+There is nothing syntactically wrong with this packet. The data is hiding in plain sight.
+
+**What the IRGFW sees:** DNS traffic on port 53 between a domestic resolver and a foreign
+authoritative nameserver. The query is for an obscure record type (NAPTR) with a normal-looking
+subdomain. The response contains standard DNS structures. Unless the firewall specifically
+inspects the entropy of every DNS field (which would break legitimate DNS), the tunnel is
+invisible.
+
 #### Primary Record Channels (Answer Section)
 
 | Record Type | Capacity per Record | How Data Is Stored |
@@ -197,57 +298,351 @@ nameservers. Less reliable because some resolvers cache referrals aggressively.
 ## Backup Channels
 
 For when your firewall administrator has discovered that DNS can be abused and has blocked
-outbound port 53, DnsTNG includes three independent fallback channels.
+outbound port 53, DnsTNG includes three independent fallback channels. These are not a theoretical
+exercise — they exist because the IRGFW (Iran's national filtering system) has been observed
+blocking DNS tunneling traffic during internet shutdowns while leaving other protocols open.
+
+### Why Three Backup Channels?
+
+The IRGFW does not block everything at once. Its filtering is applied in stages:
+
+1. **First:** VPNs and known circumvention tools are blocked via DPI (always active)
+2. **Second:** DNS over port 53 gets additional scrutiny — TXT records stripped, high-entropy
+   subdomains flagged, sometimes port 53 blocked entirely during shutdowns
+3. **Third:** Port 80 HTTP is rarely fully blocked because it would break the entire
+   domestic web infrastructure
+4. **Fourth:** Port 25/587 SMTP is almost never blocked because domestic email would stop
+
+DnsTNG's fallback order matches this escalation: DNS first, then SMTP/OCSP/CRL over
+HTTP/SMTP ports. If one channel is blocked, the client can try the next.
+
+---
 
 ### SMTP Tunnel (Port 25 / 587)
 
-Data travels upstream encoded in the EHLO hostname of an SMTP session:
+#### How It Works
+
+The SMTP tunnel disguises data as email server handshakes. Every SMTP conversation starts
+with the client sending `EHLO` followed by a hostname. DnsTNG puts tunnel data in that hostname.
+
 ```
-EHLO <base36_data>.t.<domain>
+┌──────────────────────────────────────────────────────────────────┐
+│                     SMTP Tunnel Wire Format                       │
+├──────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  UPSTREAM (Client → Server):                                     │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │  EHLO 3x9kp2r4m.t.tunnel.example.com\r\n                  │  │
+│  │       ^^^^^^^^^^                                           │  │
+│  │       Base36-encoded tunnel payload                        │  │
+│  │       Looks like: "mail server announcing its hostname"    │  │
+│  └────────────────────────────────────────────────────────────┘  │
+│                                                                  │
+│  DOWNSTREAM (Server → Client):                                   │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │  250-7kp2r9x4ma3b5c7\r\n                                  │  │
+│  │  250-d9e1f3g5h7i9j1\r\n                                   │  │
+│  │  250 ok\r\n                                                │  │
+│  │      ^^^^^^^^^^^^^^^^                                      │  │
+│  │      Base36-encoded downstream data in continuation lines  │  │
+│  │      "250-" = more data follows, "250 " = end              │  │
+│  │      Looks like: "server listing its SMTP extensions"      │  │
+│  └────────────────────────────────────────────────────────────┘  │
+│                                                                  │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
-The server (which must run a compatible SMTP listener) responds with data encoded in
-SMTP 250-continuation lines:
-```
-250-<base36_downstream_data>
-250 ok
+#### Why It Works Against the IRGFW
+
+- **Port 25/587 is open:** Iran has domestic email infrastructure (mail.ir, etc.) that
+  depends on SMTP. Blocking port 25 would stop all email delivery between domestic mail
+  servers and foreign ones. The IRGFW has never fully blocked SMTP during any shutdown.
+- **DPI doesn't flag EHLO:** The SMTP EHLO command is the very first thing any mail server
+  sends. It is the most common SMTP command on the internet. DPI rules that flag EHLO
+  hostnames would produce millions of false positives from legitimate email traffic.
+- **The conversation is syntactically valid SMTP:** A firewall watching the stream sees
+  a standard SMTP handshake. The `250-` continuation responses are exactly what real
+  mail servers send when listing their ESMTP extensions. The data in the hostname and
+  continuation lines is base36 — lowercase alphanumeric, which looks like a normal domain name.
+
+#### Setup
+
+**Server side:** The DnsTNG server needs a TCP listener on port 25 or 587 that speaks the
+SMTP tunnel protocol. Configure your server:
+
+```ini
+# server.conf
+domain = tunnel.yourdomain.com
+bind_addr = 0.0.0.0
+bind_port = 53
+
+# SMTP backup channel will listen on this port
+# Make sure port 25 is open in your server's firewall
 ```
 
-SMTP port 25 is frequently left open because email must flow. Port 587 (submission) is
-also usable. This is, depending on your perspective, either clever or unfortunate.
+Make sure no other mail server (Postfix, Exim, etc.) is already bound to port 25 on the
+same interface. If you have an existing mail server, use port 587 instead.
+
+**DNS setup for SMTP:** Add an MX record pointing to your tunnel server so the domain
+looks like it handles email:
+
+```
+; In your domain's zone file
+tunnel.yourdomain.com.  IN  MX  10  mail.tunnel.yourdomain.com.
+mail.tunnel.yourdomain.com.  IN  A  <your-server-ip>
+```
+
+**Client side:**
+
+```ini
+# client.conf
+domain = tunnel.yourdomain.com
+smtp_host = <your-server-ip>
+smtp_port = 25
+```
+
+Or use port 587 if port 25 is filtered:
+
+```ini
+smtp_port = 587
+```
+
+---
 
 ### OCSP Channel (Port 80)
 
-OCSP (Online Certificate Status Protocol) traffic is rarely blocked because blocking it would
-break TLS certificate validation for every browser on the network. DnsTNG encodes data in
-OCSP-like HTTP GET requests:
+#### How It Works
+
+OCSP (Online Certificate Status Protocol) is how browsers check if a TLS certificate has been
+revoked. Every time you visit an HTTPS website, your browser may send an OCSP request to the
+certificate's OCSP responder. DnsTNG disguises tunnel data as these OCSP requests.
 
 ```
-GET /ocsp/<base36_data> HTTP/1.0
-Host: ocsp.<domain>
-Accept: application/ocsp-response
+┌──────────────────────────────────────────────────────────────────┐
+│                     OCSP Channel Wire Format                      │
+├──────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  UPSTREAM (Client → Server):                                     │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │  GET /ocsp/3x9kp2r4ma3b5c7 HTTP/1.0\r\n                   │  │
+│  │  Host: ocsp.tunnel.example.com\r\n                         │  │
+│  │  Accept: application/ocsp-response\r\n                     │  │
+│  │  Connection: keep-alive\r\n                                │  │
+│  │  \r\n                                                      │  │
+│  │            ^^^^^^^^^^^^^^^^^^                               │  │
+│  │            Base36-encoded tunnel payload in URL path        │  │
+│  │            Looks like: "browser checking certificate status"│  │
+│  └────────────────────────────────────────────────────────────┘  │
+│                                                                  │
+│  DOWNSTREAM (Server → Client):                                   │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │  HTTP/1.0 200 OK\r\n                                       │  │
+│  │  Content-Type: application/ocsp-response\r\n               │  │
+│  │  X-Tunnel-Data: deadbeefcafebabe1234567890abcdef\r\n       │  │
+│  │  \r\n                                                      │  │
+│  │                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^            │  │
+│  │                 Hex-encoded downstream data                 │  │
+│  │                 Hidden in a custom HTTP header              │  │
+│  │  Looks like: "CA server responding with cert status"       │  │
+│  └────────────────────────────────────────────────────────────┘  │
+│                                                                  │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
-The server returns downstream data in a custom HTTP header:
-```
-X-Tunnel-Data: <hex_encoded_data>
+#### Why It Works Against the IRGFW
+
+- **OCSP is essential for HTTPS:** Every modern browser checks certificate revocation via
+  OCSP. If the IRGFW blocks OCSP traffic, every HTTPS website would show certificate errors
+  for Iranian users. This would break domestic banking sites, government portals, and
+  e-commerce — which the authorities rely on remaining functional.
+- **Port 80 is open:** OCSP uses plain HTTP (not HTTPS) on port 80, per RFC 6960. This is
+  by design — you cannot use TLS to check if your TLS certificate is valid (chicken-and-egg).
+  Port 80 is the last port any national firewall blocks.
+- **The Host header looks legitimate:** `ocsp.tunnel.example.com` looks like any other OCSP
+  responder domain. Real OCSP responders have domains like `ocsp.digicert.com`,
+  `ocsp.letsencrypt.org`, etc. The pattern is identical.
+- **The path structure is normal:** Real OCSP GET requests encode the OCSP request in the URL
+  path as base64 data. DnsTNG uses base36 which looks similar — a long alphanumeric string
+  in the URL path.
+- **The response is indistinguishable:** The `Content-Type: application/ocsp-response` header
+  makes the response look like a legitimate OCSP reply. The `X-Tunnel-Data` header blends in
+  with the many custom headers that web servers routinely add.
+
+#### Setup
+
+**Server side:** The DnsTNG server needs an HTTP listener on port 80 that responds to
+`/ocsp/*` requests. Configure your server:
+
+```ini
+# server.conf
+domain = tunnel.yourdomain.com
 ```
 
-The response also includes a valid-looking `Content-Type: application/ocsp-response` header
-to reinforce the illusion.
+If you are running a web server (Nginx, Apache) on port 80 already, configure it to reverse-proxy
+`/ocsp/*` requests to the DnsTNG server's internal port:
+
+```nginx
+# Nginx example — proxy OCSP-looking requests to DnsTNG
+server {
+    listen 80;
+    server_name ocsp.tunnel.yourdomain.com;
+
+    location /ocsp/ {
+        proxy_pass http://127.0.0.1:8080;
+    }
+}
+```
+
+**DNS setup for OCSP:** Add an A record for the OCSP subdomain:
+
+```
+ocsp.tunnel.yourdomain.com.  IN  A  <your-server-ip>
+```
+
+**Client side:**
+
+```ini
+# client.conf
+domain = tunnel.yourdomain.com
+ocsp_host = <your-server-ip>
+ocsp_port = 80
+```
+
+---
 
 ### CRL Channel (Port 80)
 
-Similar to OCSP but uses Certificate Revocation List fetch patterns:
+#### How It Works
+
+CRL (Certificate Revocation List) is the older alternative to OCSP. Instead of checking one
+certificate at a time, browsers periodically download a full list of revoked certificates from
+a CRL Distribution Point. DnsTNG disguises tunnel data as these CRL download requests.
 
 ```
-GET /crl/<session_id>/<base36_data>.crl HTTP/1.0
-Host: crl.<domain>
-Accept: application/pkix-crl
+┌──────────────────────────────────────────────────────────────────┐
+│                     CRL Channel Wire Format                       │
+├──────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  UPSTREAM (Client → Server):                                     │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │  GET /crl/00000001/3x9kp2r4m.crl HTTP/1.0\r\n             │  │
+│  │  Host: crl.tunnel.example.com\r\n                          │  │
+│  │  Accept: application/pkix-crl\r\n                          │  │
+│  │  Connection: keep-alive\r\n                                │  │
+│  │  \r\n                                                      │  │
+│  │           ^^^^^^^^ ^^^^^^^^^^                               │  │
+│  │           seq num  Base36-encoded tunnel payload            │  │
+│  │           The ".crl" extension makes it look like a file   │  │
+│  │           Looks like: "browser downloading revocation list" │  │
+│  └────────────────────────────────────────────────────────────┘  │
+│                                                                  │
+│  DOWNSTREAM (Server → Client):                                   │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │  HTTP/1.0 200 OK\r\n                                       │  │
+│  │  Content-Type: application/pkix-crl\r\n                    │  │
+│  │  X-Tunnel-Data: deadbeefcafebabe1234567890abcdef\r\n       │  │
+│  │  \r\n                                                      │  │
+│  │                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^            │  │
+│  │                 Hex-encoded downstream data                 │  │
+│  │  Looks like: "CA server serving revocation list file"      │  │
+│  └────────────────────────────────────────────────────────────┘  │
+│                                                                  │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
-Downstream data again comes in `X-Tunnel-Data` headers. CRL fetches are HTTP (not HTTPS),
-which means no TLS to deal with and they pass through almost every proxy and firewall.
+#### Why It Works Against the IRGFW
+
+- **CRL is HTTP-only by design:** Unlike OCSP which can technically use HTTPS, CRL fetches
+  are almost always plain HTTP. This is because CRL Distribution Points are embedded in
+  X.509 certificates, and the URLs are overwhelmingly `http://` (not `https://`). This means
+  the traffic is expected to be unencrypted on port 80.
+- **Blocking CRL breaks TLS:** If the IRGFW blocks CRL downloads, browsers that rely on CRL
+  (rather than OCSP) for revocation checking will either show certificate errors or fall back
+  to "soft fail" (accepting potentially revoked certificates). Either outcome disrupts normal
+  HTTPS browsing for all Iranian users.
+- **The URL pattern is standard:** Real CRL URLs look like `http://crl.digicert.com/sha2-ev-server-g3.crl`
+  or `http://crl.globalsign.com/gs/gsorganizationvalsha2g2.crl`. DnsTNG's
+  `/crl/<seq>/<data>.crl` follows the exact same pattern — a path ending in `.crl`.
+- **CRL fetches are periodic:** Browsers download CRLs on a schedule (every few hours to
+  days). This means CRL traffic is bursty, not continuous — exactly the pattern DnsTNG's
+  adaptive polling produces.
+- **The Accept header is correct:** `application/pkix-crl` is the official MIME type for
+  CRL files (RFC 5280). The response looks exactly like a real CRL server.
+
+#### Why CRL and OCSP Are Separate Channels
+
+You might ask: both OCSP and CRL run on port 80, so why have both?
+
+1. **Different DPI signatures:** A firewall rule that blocks `/ocsp/*` URLs would not catch
+   `/crl/*.crl` requests, and vice versa. Having both means you survive partial blocking.
+2. **Different Host headers:** `ocsp.example.com` and `crl.example.com` are different
+   domains. If the IRGFW blocks one, the other may still work.
+3. **Different traffic patterns:** OCSP is request-response (one cert at a time). CRL is
+   bulk download (periodic). Using whichever pattern is less suspicious on the current
+   network is an advantage.
+
+#### Setup
+
+**Server side:** Same as OCSP — an HTTP listener on port 80 that responds to `/crl/*`
+requests.
+
+If co-hosting with a web server:
+
+```nginx
+# Nginx example — proxy CRL-looking requests to DnsTNG
+server {
+    listen 80;
+    server_name crl.tunnel.yourdomain.com;
+
+    location /crl/ {
+        proxy_pass http://127.0.0.1:8080;
+    }
+}
+```
+
+**DNS setup for CRL:** Add an A record for the CRL subdomain:
+
+```
+crl.tunnel.yourdomain.com.  IN  A  <your-server-ip>
+```
+
+**Client side:**
+
+```ini
+# client.conf
+domain = tunnel.yourdomain.com
+crl_host = <your-server-ip>
+crl_port = 80
+```
+
+---
+
+### Backup Channel Fallback Strategy
+
+When the primary DNS tunnel is blocked, the client can switch to backup channels.
+The intended fallback order is:
+
+```
+1. DNS tunnel (port 53)         ← Primary, highest bandwidth
+       |
+       | (blocked by IRGFW?)
+       v
+2. OCSP channel (port 80)       ← First fallback, looks like cert validation
+       |
+       | (OCSP URLs blocked?)
+       v
+3. CRL channel (port 80)        ← Second fallback, different URL pattern
+       |
+       | (CRL URLs blocked?)
+       v
+4. SMTP tunnel (port 25/587)    ← Last resort, looks like email handshake
+```
+
+**Current status:** The backup channel implementations (SMTP, OCSP, CRL) are complete as
+standalone modules with full send/receive/connect/disconnect support. The automatic fallback
+logic that switches the client session from DNS to backup channels when DNS is detected as
+blocked is a TODO item (see TODO.md §18). For now, backup channels can be configured manually
+in the client config.
 
 ---
 
