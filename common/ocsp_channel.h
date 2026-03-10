@@ -14,6 +14,8 @@
 
 typedef struct ocsp_channel_s ocsp_channel_t;
 typedef void (*ocsp_recv_cb_t)(const uint8_t *data, size_t len, void *userdata);
+/* 1=connected, 0=disconnected */
+typedef void (*ocsp_conn_cb_t)(int connected, void *userdata);
 
 struct ocsp_channel_s {
     uv_loop_t     *loop;
@@ -23,6 +25,7 @@ struct ocsp_channel_s {
     uint16_t       port;
     char           domain[256];
     ocsp_recv_cb_t on_recv;
+    ocsp_conn_cb_t on_conn;
     void          *userdata;
     int            connected;
     uint8_t        recv_buf[8192];

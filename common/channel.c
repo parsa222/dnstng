@@ -209,6 +209,9 @@ static int strip_dots(const char *in, size_t in_len,
     size_t i;
     size_t j = 0;
 
+    if (out_cap == 0) {
+        return -1;
+    }
     for (i = 0; i < in_len; i++) {
         if (in[i] != '.') {
             if (j >= out_cap - 1U) {
@@ -265,6 +268,7 @@ void channel_buf_init(channel_buf_t *cb, uint32_t active_channels,
     cb->active_channels = active_channels;
     if (domain) {
         strncpy(cb->domain, domain, sizeof(cb->domain) - 1);
+        cb->domain[sizeof(cb->domain) - 1] = '\0';
     }
     /* Wire up resp pointers */
     cb->resp.answers       = cb->answers;

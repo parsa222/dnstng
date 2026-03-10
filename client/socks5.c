@@ -321,8 +321,8 @@ static void on_new_connection(uv_stream_t *server, int status)
     uv_tcp_init(srv->loop, &conn->tcp);
 
     if (uv_accept(server, (uv_stream_t *)&conn->tcp) != 0) {
-        uv_close((uv_handle_t *)&conn->tcp, NULL);
-        free(conn);
+        conn->on_close = NULL; /* don't notify on accept failure */
+        uv_close((uv_handle_t *)&conn->tcp, close_handle_cb);
         return;
     }
 

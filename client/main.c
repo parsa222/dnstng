@@ -76,9 +76,11 @@ int main(int argc, char *argv[])
         } else if (strcmp(argv[i], "--domain") == 0 && i + 1 < argc) {
             i++;
             strncpy(cfg.domain, argv[i], sizeof(cfg.domain) - 1);
+            cfg.domain[sizeof(cfg.domain) - 1] = '\0';
         } else if (strcmp(argv[i], "--resolver") == 0 && i + 1 < argc) {
             i++;
             strncpy(cfg.resolver, argv[i], sizeof(cfg.resolver) - 1);
+            cfg.resolver[sizeof(cfg.resolver) - 1] = '\0';
         } else if (strcmp(argv[i], "--listen") == 0 && i + 1 < argc) {
             i++;
             parse_addr_port(argv[i], cfg.listen_addr,

@@ -357,6 +357,9 @@ void tunnel_server_stop(tunnel_server_t *ts)
         return;
     }
     uv_timer_stop(&ts->cleanup_timer);
+    if (!uv_is_closing((uv_handle_t *)&ts->cleanup_timer)) {
+        uv_close((uv_handle_t *)&ts->cleanup_timer, NULL);
+    }
     dns_server_stop(&ts->dns);
 }
 

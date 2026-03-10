@@ -14,6 +14,8 @@
 
 typedef struct crl_channel_s crl_channel_t;
 typedef void (*crl_recv_cb_t)(const uint8_t *data, size_t len, void *userdata);
+/* 1=connected, 0=disconnected */
+typedef void (*crl_conn_cb_t)(int connected, void *userdata);
 
 struct crl_channel_s {
     uv_loop_t    *loop;
@@ -23,6 +25,7 @@ struct crl_channel_s {
     uint16_t      port;
     char          domain[256];
     crl_recv_cb_t on_recv;
+    crl_conn_cb_t on_conn;
     void         *userdata;
     int           connected;
     uint8_t       recv_buf[8192];

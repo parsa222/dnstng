@@ -108,6 +108,9 @@ static void ocsp_read_cb(uv_stream_t *stream, ssize_t nread,
 
     if (nread < 0) {
         ch->connected = 0;
+        if (ch->on_conn) {
+            ch->on_conn(0, ch->userdata);
+        }
         return;
     }
     if (nread == 0) {
@@ -130,9 +133,15 @@ static void ocsp_connect_cb(uv_connect_t *req, int status)
 
     if (status < 0) {
         ch->connected = 0;
+        if (ch->on_conn) {
+            ch->on_conn(0, ch->userdata);
+        }
         return;
     }
     ch->connected = 1;
+    if (ch->on_conn) {
+        ch->on_conn(1, ch->userdata);
+    }
     uv_read_start((uv_stream_t *)&ch->tcp, ocsp_alloc_cb, ocsp_read_cb);
 }
 
@@ -156,7 +165,9 @@ err_t ocsp_channel_init(ocsp_channel_t *ch, uv_loop_t *loop,
     ch->loop = loop;
     ch->port = port;
     strncpy(ch->host,   host,   sizeof(ch->host)   - 1);
+    ch->host[sizeof(ch->host) - 1] = '\0';
     strncpy(ch->domain, domain, sizeof(ch->domain) - 1);
+    ch->domain[sizeof(ch->domain) - 1] = '\0';
 
     uv_tcp_init(loop, &ch->tcp);
     ch->tcp.data         = ch;
@@ -229,6 +240,7 @@ void ocsp_channel_free(ocsp_channel_t *ch)
         return;
     }
     ch->connected = 0;
+    uv_read_stop((uv_stream_t *)&ch->tcp);
     if (!uv_is_closing((uv_handle_t *)&ch->tcp)) {
         uv_close((uv_handle_t *)&ch->tcp, ocsp_close_cb);
     }
