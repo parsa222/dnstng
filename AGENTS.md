@@ -124,11 +124,19 @@ tests/
 ## How to Build
 
 ```bash
-# Dependencies (Debian/Ubuntu)
-apt-get install cmake libuv1-dev libcares-dev liblz4-dev
+# Dependencies (Ubuntu 20.04 / 22.04 / 24.04)
+sudo apt-get update
+sudo apt-get install -y build-essential cmake pkg-config \
+    libuv1-dev libc-ares-dev liblz4-dev
 
-# Build
-mkdir build && cd build
+# Quick build (installs deps, compiles, runs tests)
+./build.sh
+
+# Or manual build with GNU Make
+make clean && make all
+
+# Or manual build with CMake
+mkdir -p build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Debug
 make -j$(nproc)
 ```

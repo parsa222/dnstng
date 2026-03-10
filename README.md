@@ -260,38 +260,50 @@ The server must be reachable on UDP port 53 from the internet. It also needs to 
 make outbound TCP connections (for proxying traffic). If your server cannot make outbound
 connections, you have bigger problems than this tool can solve.
 
-### Build
+### Quick Build (Ubuntu)
+
+The fastest way to install dependencies and build on Ubuntu (20.04 / 22.04 / 24.04):
 
 ```bash
-# Install dependencies (Debian/Ubuntu)
-apt-get install cmake libuv1-dev libcares-dev liblz4-dev
+./build.sh
+```
 
-# Build
-mkdir build && cd build
+This installs all required packages, compiles both binaries, and runs the test suite.
+The binaries end up in `build/`.
+
+### Manual Build (Ubuntu)
+
+If you prefer to do it yourself:
+
+```bash
+# Install dependencies
+sudo apt-get update
+sudo apt-get install -y build-essential cmake pkg-config \
+    libuv1-dev libc-ares-dev liblz4-dev
+
+# Build with GNU Make (recommended)
+make clean && make all
+
+# Or build with CMake
+mkdir -p build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Release
 make -j$(nproc)
 ```
 
-This produces two binaries: `dnstunnel-client` and `dnstunnel-server`.
+This produces two binaries: `dnstunnel-client` and `dnstunnel-server` in `build/`.
 
-For a fully static build (no glibc dependency):
+### Run Tests
+
 ```bash
-# Install musl toolchain
-apt-get install musl-tools musl-dev
+# GNU Make
+make tests
 
-# Static build
-cmake .. -DCMAKE_BUILD_TYPE=Release \
-         -DCMAKE_C_COMPILER=musl-gcc \
-         -DCMAKE_EXE_LINKER_FLAGS="-static"
-make -j$(nproc)
+# Or CMake
+cd build && ctest --output-on-failure
 ```
 
-For ARM64 (Android/phones):
-```bash
-apt-get install gcc-aarch64-linux-gnu
-cmake .. -DCMAKE_TOOLCHAIN_FILE=cmake/aarch64-linux-gnu.cmake
-make -j$(nproc)
-```
+All 5 test binaries must pass: `test_encode`, `test_transport`, `test_dns_packet`,
+`test_channel`, `test_chain`.
 
 ### Server Setup
 
