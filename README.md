@@ -137,10 +137,7 @@ to carry tunnel data. Fields marked with `◄── DATA` carry hidden payload b
 ├──────────────────────────────────────────────────────────────────────┤
 │  Record 1: tunnel.example.com  NAPTR                                 │
 │  ┌──────────────────────────────────────────────────────────────┐    │
-│  │  TTL: 0x00A1B2C3                              ◄── DATA (3B) │    │
-│  │       ~~^^^^^^^^                                             │    │
-│  │       Upper 8 bits kept low (looks normal)                   │    │
-│  │       Lower 24 bits = 3 bytes of hidden data                 │    │
+│  │  TTL: 300  (normal cache time, NOT used for data)           │    │
 │  ├──────────────────────────────────────────────────────────────┤    │
 │  │  Order: 10    Preference: 100                                │    │
 │  │  Flags: "u"   Service: "sip+E2U"                             │    │
@@ -161,7 +158,7 @@ to carry tunnel data. Fields marked with `◄── DATA` carry hidden payload b
 │  Record 1:                                                           │
 │    NAME: tunnel.example.com                                          │
 │    TYPE: NS                                                          │
-│    TTL:  300  (normal, NOT used for data — see note below)           │
+│    TTL:  300  (normal, NOT used for data — resolvers decrement it)    │
 │    RDATA: 7kp2r9x4m.ns0.tunnel.example.com           ◄── DATA      │
 │            ^^^^^^^^^^                                                │
 │            Base36-encoded data chunk in NS name labels               │

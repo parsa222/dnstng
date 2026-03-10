@@ -494,11 +494,6 @@ int channel_pack(channel_buf_t *cb, const uint8_t *data, size_t data_len)
     cb->resp.auth_ns_names = (const char **)cb->ns_name_ptrs;
     cb->resp.num_auth_ns   = cb->num_ns;
     cb->resp.auth_ns_ttl   = 300;
-    cb->resp.addl_records  = NULL;
-    cb->resp.num_addl      = 0;
-    cb->resp.edns_opt_data = NULL;
-    cb->resp.edns_opt_len  = 0;
-    cb->resp.edns0_size    = 0;
 
     return (int)packed;
 }
