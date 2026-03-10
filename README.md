@@ -1,4 +1,4 @@
-# DnstTNG — DNS Tunneling New Generation
+# DnsTNG — DNS Tunneling New Generation
 
 Yes, this is a DNS tunnel. Yes, you have seen these before. This one just happens to use every single
 field in the DNS protocol that can carry a byte without immediately crashing a resolver, plus three
@@ -8,7 +8,7 @@ backup channels for when your network administrator finally gets around to block
 
 ## What It Is
 
-DnstTNG tunnels arbitrary TCP traffic (via a local SOCKS5 proxy) through DNS queries and responses.
+DnsTNG tunnels arbitrary TCP traffic (via a local SOCKS5 proxy) through DNS queries and responses.
 The client runs inside a censored network that permits DNS. The server runs as an authoritative
 nameserver outside. The domestic recursive resolver between them does the heavy lifting for free.
 
@@ -20,7 +20,7 @@ than working ones.
 
 ## Why This Exists: Network Restrictions and the IRGFW
 
-DnstTNG is built for heavily restricted networks — specifically ones like the IRGFW (Iran's
+DnsTNG is built for heavily restricted networks — specifically ones like the IRGFW (Iran's
 national filtering system), which blocks VPNs via DPI, hijacks foreign DNS resolvers, strips
 TXT records to defeat tunnel tools, and flags high-entropy subdomains as suspicious traffic.
 The one path it cannot close is recursive DNS: domestic resolvers must reach outside
@@ -36,10 +36,10 @@ supports only a single downstream channel, and has no fallback when DNS is filte
 than iodine. TXT records are specifically what the IRGFW blocks first. When TXT is gone,
 dnstt stops. Base32 encoding again produces detectable entropy. Single channel, no fallback.
 
-DnstTNG's approach: negotiate at session start which channels survive, spread data across
+DnsTNG's approach: negotiate at session start which channels survive, spread data across
 every available DNS field, and fall back to SMTP/OCSP/CRL if DNS itself is blocked.
 
-| Capability | iodine | dnstt | DnstTNG |
+| Capability | iodine | dnstt | DnsTNG |
 |---|---|---|---|
 | Record types | NULL/TXT/CNAME/MX | TXT only | NAPTR, SOA, NULL, TXT, CAA, SRV, CNAME, AAAA, A (auto) |
 | Downstream channels | Single record type | Single TXT record | Answer + Authority NS + Additional glue + TTL bits + EDNS0 |
@@ -98,7 +98,7 @@ Additional upstream bytes come from:
 
 This is where it gets interesting. A single DNS response can carry data in multiple fields
 simultaneously. Instead of the traditional "put everything in a TXT record and hope for 255 bytes",
-DnstTNG uses every available container:
+DnsTNG uses every available container:
 
 #### Primary Record Channels (Answer Section)
 
@@ -133,7 +133,7 @@ is how multiple small channels combine into one larger effective bandwidth.
 
 #### Multi-Channel Secondary Fields
 
-Beyond the answer records, DnstTNG packs data into additional DNS response fields:
+Beyond the answer records, DnsTNG packs data into additional DNS response fields:
 
 **Authority Section (NS records):**
 Each NS name encodes a chunk of data as base36 labels: `<base36_data>.ns<i>.<domain>`.
@@ -190,7 +190,7 @@ nameservers. Less reliable because some resolvers cache referrals aggressively.
 ## Backup Channels
 
 For when your firewall administrator has discovered that DNS can be abused and has blocked
-outbound port 53, DnstTNG includes three independent fallback channels.
+outbound port 53, DnsTNG includes three independent fallback channels.
 
 ### SMTP Tunnel (Port 25 / 587)
 
@@ -212,7 +212,7 @@ also usable. This is, depending on your perspective, either clever or unfortunat
 ### OCSP Channel (Port 80)
 
 OCSP (Online Certificate Status Protocol) traffic is rarely blocked because blocking it would
-break TLS certificate validation for every browser on the network. DnstTNG encodes data in
+break TLS certificate validation for every browser on the network. DnsTNG encodes data in
 OCSP-like HTTP GET requests:
 
 ```
@@ -417,7 +417,7 @@ Running `--check` produces a report like this:
 
 ## Reliability Layer
 
-DNS is UDP. UDP drops packets, reorders them, and duplicates them for fun. DnstTNG handles
+DNS is UDP. UDP drops packets, reorders them, and duplicates them for fun. DnsTNG handles
 this with a transport layer on top:
 
 - **Sequence numbers** on every packet (2 bytes)
