@@ -28,3 +28,8 @@ err_t dns_server_respond(dns_server_t *srv, uint16_t query_id,
                           const char *fqdn, dns_type_t qtype,
                           const struct sockaddr *to, socklen_t to_len,
                           const uint8_t *data, size_t data_len);
+
+/* Send a pre-built DNS packet (from dns_build_response_ext / chain_build_*).
+ * The buffer is copied internally; caller retains ownership of buf. */
+err_t dns_server_send_raw(dns_server_t *srv, const uint8_t *buf, size_t len,
+                           const struct sockaddr *to, socklen_t to_len);

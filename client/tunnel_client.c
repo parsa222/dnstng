@@ -3,6 +3,8 @@
 #include "encode.h"
 #include "log.h"
 #include "stealth.h"
+#include "channel.h"
+#include "chain.h"
 #include <arpa/nameser.h>
 #include <string.h>
 #include <stdlib.h>
@@ -109,16 +111,95 @@ static void ares_txt_cb(void *arg, int status, int timeouts,
         return;
     }
 
-    /* Parse TXT / NULL record RDATA from the DNS response */
+    /* ── Multi-channel unpack path ─────────────────────────────────── */
     {
-        /* Use manual parsing: scan answer section for TXT records */
+        dns_parsed_response_t parsed;
+        err_t e;
+
+        e = dns_parse_response_full(abuf, (size_t)alen, &parsed);
+        if (e == ERR_OK) {
+            uint8_t flat[4096];
+            int     flat_len = -1;
+
+            /* Try CNAME chain parsing first */
+            if (tc->transport.active_channels & CHAN_CNAME_CHAIN) {
+                flat_len = chain_parse_cname(&parsed, tc->cfg.domain,
+                                              flat, sizeof(flat));
+            }
+            /* Try NS referral chain parsing */
+            if (flat_len <= 0 &&
+                    (tc->transport.active_channels & CHAN_NS_CHAIN)) {
+                flat_len = chain_parse_ns_referral(&parsed, tc->cfg.domain,
+                                                    flat, sizeof(flat));
+            }
+            /* Standard multi-channel unpack */
+            if (flat_len <= 0 && tc->transport.active_channels != 0) {
+                flat_len = channel_unpack(&parsed,
+                                           tc->transport.active_channels,
+                                           flat, sizeof(flat));
+            }
+
+            if (flat_len > 0) {
+                tunnel_header_t  hdr;
+                const uint8_t   *payload;
+                size_t           payload_len;
+
+                e = transport_parse_packet(flat, (size_t)flat_len,
+                                            &hdr, &payload, &payload_len);
+                if (e == ERR_OK) {
+                    transport_ack(&tc->transport, hdr.seq_num);
+
+                    /* SYN-ACK: extract negotiated channel bitmask */
+                    if ((hdr.flags & (TUNNEL_FLAG_SYN | TUNNEL_FLAG_ACK)) ==
+                            (TUNNEL_FLAG_SYN | TUNNEL_FLAG_ACK)) {
+                        if (payload_len >= 4) {
+                            uint32_t neg =
+                                ((uint32_t)payload[0] << 24) |
+                                ((uint32_t)payload[1] << 16) |
+                                ((uint32_t)payload[2] <<  8) |
+                                 (uint32_t)payload[3];
+                            tc->transport.active_channels = neg;
+                            LOG_INFO("Negotiated channels: 0x%08x",
+                                     (unsigned)neg);
+                        }
+                        tc->state = SESSION_ACTIVE;
+                        return;
+                    }
+
+                    if ((hdr.flags & TUNNEL_FLAG_DATA) && payload_len > 0) {
+                        st = find_stream(tc, hdr.session_id);
+                        if (!st) {
+                            st = find_stream(tc, tc->session_id);
+                        }
+                        if (st && st->socks5) {
+                            socks5_conn_send(st->socks5, payload,
+                                             payload_len);
+                        }
+                    }
+
+                    if (hdr.flags & TUNNEL_FLAG_FIN) {
+                        st = find_stream(tc, hdr.session_id);
+                        if (st && st->socks5) {
+                            socks5_conn_close(st->socks5);
+                        }
+                    }
+
+                    if (hdr.flags & TUNNEL_FLAG_ACK) {
+                        transport_ack(&tc->transport, hdr.ack_num);
+                    }
+                }
+                return;
+            }
+        }
+    }
+
+    /* ── Fallback: legacy TXT/NULL parsing ─────────────────────────── */
+    {
         const uint8_t *buf = abuf;
         size_t         len = (size_t)alen;
         uint16_t       ancount;
         size_t         off = 12;
         uint16_t       i;
-        char           name_tmp[512];
-        int            ret;
 
         if (len < 12) {
             return;
@@ -128,14 +209,13 @@ static void ares_txt_cb(void *arg, int status, int timeouts,
         {
             uint16_t qdcount = (uint16_t)((buf[4] << 8) | buf[5]);
             for (i = 0; i < qdcount; i++) {
-                /* Skip name */
                 while (off < len) {
                     uint8_t b = buf[off];
                     if (b == 0) { off++; break; }
                     if ((b & 0xC0U) == 0xC0U) { off += 2; break; }
                     off += 1 + b;
                 }
-                off += 4; /* QTYPE + QCLASS */
+                off += 4;
             }
         }
 
@@ -155,9 +235,6 @@ static void ares_txt_cb(void *arg, int status, int timeouts,
                     nr++;
                 }
             }
-
-            (void)name_tmp;
-            (void)ret;
 
             if (off + 10 > len) {
                 break;
@@ -179,7 +256,6 @@ static void ares_txt_cb(void *arg, int status, int timeouts,
                 const uint8_t *rdata    = buf + off;
                 size_t         data_off = 0;
 
-                /* TXT: first byte is string length */
                 if (rtype == 16) {
                     if (rdlen < 1) {
                         off += rdlen;
@@ -199,7 +275,6 @@ static void ares_txt_cb(void *arg, int status, int timeouts,
                         tc->cfg.encode_mode);
 
                     if (dec_len > 0) {
-                        /* Parse as tunnel packet */
                         tunnel_header_t hdr;
                         const uint8_t  *payload;
                         size_t          payload_len;
@@ -210,6 +285,22 @@ static void ares_txt_cb(void *arg, int status, int timeouts,
                                                     &payload_len);
                         if (e == ERR_OK) {
                             transport_ack(&tc->transport, hdr.seq_num);
+
+                            /* SYN-ACK: negotiation in fallback path */
+                            if ((hdr.flags & (TUNNEL_FLAG_SYN | TUNNEL_FLAG_ACK)) ==
+                                    (TUNNEL_FLAG_SYN | TUNNEL_FLAG_ACK)) {
+                                if (payload_len >= 4) {
+                                    uint32_t neg =
+                                        ((uint32_t)payload[0] << 24) |
+                                        ((uint32_t)payload[1] << 16) |
+                                        ((uint32_t)payload[2] <<  8) |
+                                         (uint32_t)payload[3];
+                                    tc->transport.active_channels = neg;
+                                }
+                                tc->state = SESSION_ACTIVE;
+                                off += rdlen;
+                                continue;
+                            }
 
                             if ((hdr.flags & TUNNEL_FLAG_DATA) && payload_len > 0) {
                                 st = find_stream(tc, hdr.session_id);
@@ -296,10 +387,17 @@ static void poll_timer_cb(uv_timer_t *timer)
     if (tc->state == SESSION_INIT || tc->state == SESSION_HANDSHAKE) {
         uint8_t pkt[TUNNEL_HEADER_SIZE + TUNNEL_MAX_PAYLOAD];
         int     pkt_len;
+        /* Include channel bitmask in SYN payload (4 bytes big-endian) */
+        uint8_t syn_payload[4];
+        uint32_t chans = tc->cfg.active_channels;
+        syn_payload[0] = (uint8_t)(chans >> 24);
+        syn_payload[1] = (uint8_t)((chans >> 16) & 0xFFU);
+        syn_payload[2] = (uint8_t)((chans >>  8) & 0xFFU);
+        syn_payload[3] = (uint8_t)(chans & 0xFFU);
 
         pkt_len = transport_build_packet(&tc->transport, tc->session_id,
                                           TUNNEL_FLAG_SYN,
-                                          NULL, 0, pkt, sizeof(pkt));
+                                          syn_payload, 4, pkt, sizeof(pkt));
         if (pkt_len > 0) {
             send_dns_query(tc, pkt, (size_t)pkt_len, 0);
         }

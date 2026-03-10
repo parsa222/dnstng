@@ -21,9 +21,10 @@ target_link_libraries(common_lib
 
 # Client binary
 add_executable(dnstunnel-client
-    client/main.c client/socks5.c client/tunnel_client.c client/check.c)
+    client/main.c client/socks5.c client/tunnel_client.c client/check.c
+    server/chain.c)
 target_include_directories(dnstunnel-client PRIVATE
-    common third_party ${LIBUV_INCLUDE_DIRS} ${CARES_INCLUDE_DIRS})
+    common server third_party ${LIBUV_INCLUDE_DIRS} ${CARES_INCLUDE_DIRS})
 target_link_libraries(dnstunnel-client common_lib)
 
 # Server binary

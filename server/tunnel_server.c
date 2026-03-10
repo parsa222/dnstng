@@ -2,6 +2,8 @@
 #include "encode.h"
 #include "log.h"
 #include "transport.h"
+#include "channel.h"
+#include "chain.h"
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -172,6 +174,7 @@ static void on_dns_query(uint16_t query_id, const char *fqdn,
     uint8_t           pkt_buf[512];
     int               pkt_len;
     const char       *suffix_check;
+    int               is_syn = 0;
 
     /* Is this a "check" query? */
     suffix_check = strstr(fqdn, "check.t.");
@@ -218,7 +221,28 @@ static void on_dns_query(uint16_t query_id, const char *fqdn,
                     if (sess) {
                         memcpy(&sess->client_addr, from, from_len);
                         sess->client_addr_len = from_len;
-                        LOG_INFO("New session 0x%04x from client", session_id);
+
+                        /* Channel negotiation: client sends its CHAN_* bitmask
+                         * in SYN payload bytes [0..3].  Server intersects with
+                         * its own supported channels. */
+                        if (payload_len >= 4) {
+                            uint32_t client_chans =
+                                ((uint32_t)payload[0] << 24) |
+                                ((uint32_t)payload[1] << 16) |
+                                ((uint32_t)payload[2] <<  8) |
+                                 (uint32_t)payload[3];
+                            sess->transport.active_channels =
+                                client_chans & ts->cfg.active_channels;
+                        } else {
+                            /* No channel info in SYN: use server defaults */
+                            sess->transport.active_channels =
+                                ts->cfg.active_channels;
+                        }
+
+                        LOG_INFO("New session 0x%04x from client (channels=0x%08x)",
+                                 session_id,
+                                 (unsigned)sess->transport.active_channels);
+                        is_syn = 1;
                     }
                 }
 
@@ -246,33 +270,88 @@ static void on_dns_query(uint16_t query_id, const char *fqdn,
         return;
     }
 
-    pkt_len = transport_build_packet(&sess->transport, session_id,
-                                      TUNNEL_FLAG_ACK,
-                                      NULL, 0, pkt_buf, sizeof(pkt_buf));
+    pkt_len = -1;
+    /* SYN-ACK: include negotiated channels bitmask (4 bytes) as payload */
+    if (is_syn) {
+        uint8_t syn_ack_payload[4];
+        uint32_t neg = sess->transport.active_channels;
+        syn_ack_payload[0] = (uint8_t)(neg >> 24);
+        syn_ack_payload[1] = (uint8_t)((neg >> 16) & 0xFFU);
+        syn_ack_payload[2] = (uint8_t)((neg >>  8) & 0xFFU);
+        syn_ack_payload[3] = (uint8_t)(neg & 0xFFU);
+        pkt_len = transport_build_packet(&sess->transport, session_id,
+                                          TUNNEL_FLAG_SYN | TUNNEL_FLAG_ACK,
+                                          syn_ack_payload, 4,
+                                          pkt_buf, sizeof(pkt_buf));
+    } else {
+        pkt_len = transport_build_packet(&sess->transport, session_id,
+                                          TUNNEL_FLAG_ACK,
+                                          NULL, 0, pkt_buf, sizeof(pkt_buf));
+    }
     if (pkt_len > 0) {
-        char  resp_labels[512];
-        int   encoded_labels_len;
-        uint8_t resp_data[512];
-        int     resp_data_len;
+        uint8_t resp_wire[4096];
+        int     resp_len = -1;
 
-        encoded_labels_len = encode_to_labels(pkt_buf, (size_t)pkt_len,
-                                  resp_labels, sizeof(resp_labels),
-                                  ENCODE_BASE32);
-
-        if (encoded_labels_len > 0) {
-            resp_data_len = encoded_labels_len;
-            if (resp_data_len > (int)sizeof(resp_data)) {
-                resp_data_len = (int)sizeof(resp_data);
+        /* Use CNAME chaining if negotiated and configured */
+        if ((sess->transport.active_channels & CHAN_CNAME_CHAIN) &&
+                ts->cfg.cname_chain_depth > 0) {
+            resp_len = chain_build_cname(query_id, fqdn,
+                                          ts->cfg.domain,
+                                          pkt_buf, (size_t)pkt_len,
+                                          ts->cfg.cname_chain_depth,
+                                          resp_wire, sizeof(resp_wire));
+        }
+        /* Use NS referral chaining if CNAME not used and NS negotiated */
+        else if ((sess->transport.active_channels & CHAN_NS_CHAIN) &&
+                  ts->cfg.ns_chain_depth > 0) {
+            resp_len = chain_build_ns_referral(query_id, fqdn,
+                                                ts->cfg.domain,
+                                                pkt_buf, (size_t)pkt_len,
+                                                ts->cfg.ns_chain_depth,
+                                                resp_wire, sizeof(resp_wire));
+        }
+        /* Use multi-channel packing */
+        else if (sess->transport.active_channels != 0) {
+            channel_buf_t cb;
+            channel_buf_init(&cb, sess->transport.active_channels,
+                             ts->cfg.domain);
+            if (channel_pack(&cb, pkt_buf, (size_t)pkt_len) > 0) {
+                resp_len = dns_build_response_ext(query_id, fqdn, qtype,
+                                                   &cb.resp,
+                                                   resp_wire,
+                                                   sizeof(resp_wire));
             }
-            memcpy(resp_data, resp_labels, (size_t)resp_data_len);
-        } else {
-            resp_data[0]  = 0;
-            resp_data_len = 1;
         }
 
-        dns_server_respond(&ts->dns, query_id, fqdn, qtype,
-                            from, from_len,
-                            resp_data, (size_t)resp_data_len);
+        if (resp_len > 0) {
+            dns_server_send_raw(&ts->dns, resp_wire, (size_t)resp_len,
+                                from, from_len);
+        } else {
+            /* Fallback: plain TXT response */
+            char    resp_labels[512];
+            int     encoded_labels_len;
+            uint8_t resp_data[512];
+            int     resp_data_len;
+
+            encoded_labels_len = encode_to_labels(pkt_buf, (size_t)pkt_len,
+                                      resp_labels, sizeof(resp_labels),
+                                      ENCODE_BASE32);
+
+            if (encoded_labels_len > 0) {
+                resp_data_len = encoded_labels_len;
+                if (resp_data_len > (int)sizeof(resp_data)) {
+                    resp_data_len = (int)sizeof(resp_data);
+                }
+                memcpy(resp_data, resp_labels, (size_t)resp_data_len);
+            } else {
+                resp_data[0]  = 0;
+                resp_data_len = 1;
+            }
+
+            dns_server_respond(&ts->dns, query_id, fqdn, qtype,
+                                from, from_len,
+                                resp_data, (size_t)resp_data_len);
+        }
     }
 }
 

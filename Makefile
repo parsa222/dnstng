@@ -54,7 +54,8 @@ COMMON_SRCS := $(wildcard common/*.c) third_party/lz4.c
 CLIENT_SRCS := client/main.c \
                client/socks5.c \
                client/tunnel_client.c \
-               client/check.c
+               client/check.c \
+               server/chain.c
 
 SERVER_SRCS := server/main.c \
                server/dns_server.c \
