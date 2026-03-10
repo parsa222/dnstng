@@ -18,6 +18,114 @@ than working ones.
 
 ---
 
+## The Problem: IRGFW and Network-Level Censorship
+
+DnstTNG is built specifically for use against national-level firewalls — the kind operated by
+states that have decided their citizens should not have unrestricted access to the internet.
+The most complete example of this architecture is the IRGFW (Iran's national filtering
+infrastructure, which is wired deeply into the country's domestic internet exchange points and
+enforces restrictions by decree rather than by consensus).
+
+### How the IRGFW Works
+
+The IRGFW is not a single box you can route around. It is woven into the routing fabric of
+every Iranian ISP. Its relevant capabilities for anyone trying to tunnel out:
+
+- **Whitelist-based DNS:** Users can only send DNS queries to a small set of approved domestic
+  resolvers. Direct queries to 8.8.8.8, 1.1.1.1, or any foreign resolver are silently dropped
+  or hijacked. This sounds limiting but it is actually the key weakness the tool exploits.
+
+- **Deep Packet Inspection (DPI):** All traffic is inspected at the transport layer. VPN
+  protocols (OpenVPN, WireGuard, IPSec) are fingerprinted and blocked. TLS to foreign IPs
+  is blocked by SNI matching. Protocols with high-entropy payloads that do not match any known
+  pattern are throttled or dropped on suspicion of tunneling.
+
+- **TXT record filtering:** Because DNS-over-TXT tunneling (dnstt and its predecessors) became
+  popular, TXT record responses from non-whitelisted domains are frequently stripped or delayed
+  by domestic resolvers. TXT queries that are not for known SPF/DKIM records are treated with
+  suspicion.
+
+- **Entropy analysis:** Subdomains with high Shannon entropy (random-looking base64 strings)
+  are flagged as potential tunnel traffic. A query for
+  `aGVsbG8gd29ybGQ=.abc123.tunnel.example.com` looks like a tunnel query. A query for
+  `3x9kp2r.0042.t.example.com` looks like a slightly unusual but plausible subdomain.
+
+### The Recursive Resolver Loophole
+
+The one thing the firewall cannot remove without breaking the internet entirely is recursive
+DNS resolution. Domestic resolvers must be able to resolve any domain name, which means they
+must be able to reach authoritative nameservers outside Iran. That path — from the domestic
+resolver to the outside authoritative server — is the tunnel.
+
+The client does not send packets directly outside. It sends DNS queries to a domestic resolver.
+The domestic resolver sends packets outside on the client's behalf. The firewall sees normal
+recursive resolution traffic and lets it through. This is why DNS tunneling continues to work
+even in heavily filtered networks where everything else is blocked.
+
+---
+
+## Why Not Just Use dnstt
+
+dnstt (written by David Fifield, available at https://www.bamsoftware.com/software/dnstt/) is
+the standard reference implementation of DNS tunneling. It works. It is well-written. This
+tool exists because it has limitations that matter in practice when the network you are fighting
+against is specifically tuned to detect and block it.
+
+### What dnstt Does
+
+dnstt encodes a QUIC transport stream over DNS. It uses TXT queries for downstream data and
+encodes upstream data in subdomain labels. It has a clean design, handles reliability via
+QUIC's built-in mechanisms, and has been used successfully in a number of censored networks.
+
+The problems:
+
+**1. TXT records only for downstream.**
+dnstt uses TXT records as its primary downstream channel. As noted above, TXT records are
+the first thing a moderately sophisticated firewall blocks when it notices DNS tunneling is
+happening. When TXT gets blocked, dnstt stops working. There is no fallback.
+
+**2. High-entropy subdomains.**
+dnstt uses base32 encoding for upstream data. Base32 uses 32 characters (a-z, 2-7) and
+produces strings with measurably higher entropy than normal subdomains. Entropy-based DPI
+fingerprints dnstt queries reliably enough that Iranian ISPs have deployed it.
+
+**3. Single-channel design.**
+A dnstt query carries data in exactly one place: the subdomain labels. A dnstt response
+carries data in exactly one place: the TXT record RDATA. There is no use of TXID, TTL
+fields, authority section, additional section, or EDNS0 options. This limits bandwidth and
+makes the traffic pattern extremely predictable.
+
+**4. No record-type fallback.**
+If TXT is blocked, dnstt offers no automatic fallback to NAPTR, SOA, CAA, SRV, or any
+other record type. Switching requires manually reconfiguring and restarting.
+
+**5. Bandwidth ceiling.**
+In practice, dnstt achieves roughly 1-3 KB/s in heavily filtered networks because it is
+limited to one TXT record per response (~255 bytes) and must respect round-trip time.
+For anything beyond reading text web pages, this is unusable.
+
+### What DnstTNG Does Differently
+
+| Capability | dnstt | DnstTNG |
+|---|---|---|
+| Record types used | TXT only | NAPTR, SOA, SVCB, HINFO, NULL, TXT, CAA, SRV, CNAME, AAAA, A (auto-negotiated) |
+| Downstream channels | Answer RDATA | Answer + Authority NS names + Additional glue + TTL bits + EDNS0 option |
+| Upstream channels | Subdomain labels | Subdomain labels + TXID field + EDNS0 option |
+| Encoding | Base32 (higher entropy) | Base36 (lower entropy, looks like normal subdomains) |
+| Bandwidth multiplier | None | CNAME chaining (up to 8x) and NS referral chaining |
+| Fallback if DNS blocked | None | SMTP tunnel (port 25), OCSP channel (port 80), CRL channel (port 80) |
+| TXT record dependency | Hard dependency | Optional; disabled automatically if blocked |
+| Entropy fingerprinting | Detectable | Reduced by Base36 + jitter + label-length variation |
+| Anti-detection features | Minimal | Jitter, noise domains, query-type rotation, TTL mimicry |
+| Estimated bandwidth | ~1-3 KB/s | ~20-200 KB/s depending on which channels survive |
+
+The core principle of DnstTNG is that instead of betting everything on one record type and one
+encoding scheme, it spreads data across every controllable bit in the DNS exchange, negotiates
+at session start to find out which channels actually survive the path through the recursive
+resolver, and falls back to non-DNS protocols when even DNS is not enough.
+
+---
+
 ## How It Works
 
 ### The Basic Idea
