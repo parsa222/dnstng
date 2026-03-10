@@ -22,12 +22,18 @@ typedef enum {
 /* EDNS0 custom option code for tunnel data */
 #define EDNS0_TUNNEL_OPTION 65001U
 
-/* Multi-channel capabilities bit flags */
+/* Multi-channel capabilities bit flags.
+ *
+ * Removed channels (do not work through real recursive resolvers):
+ * - CHAN_TTL_DATA:  Resolvers decrement TTL by cache age (RFC 2181),
+ *                   corrupting any data encoded in the lower bits.
+ * - CHAN_EDNS_OPT:  Resolvers do not forward unknown EDNS0 options
+ *                   (RFC 6891 §6.1.2); they are hop-by-hop, not end-to-end.
+ * - CHAN_ADDL_GLUE: Resolvers routinely strip Additional section glue
+ *                   records that don't match authority NS names.
+ */
 #define CHAN_TXID         0x01U    /* TXID carries upstream data */
-#define CHAN_EDNS_OPT     0x02U    /* EDNS0 custom option carries upstream data */
 #define CHAN_AUTH_NS      0x04U    /* Authority NS names carry downstream data */
-#define CHAN_ADDL_GLUE    0x08U    /* Additional glue records carry downstream data */
-#define CHAN_TTL_DATA     0x10U    /* TTL fields carry downstream data */
 #define CHAN_MULTI_ANSWER 0x20U    /* Multiple answer records */
 #define CHAN_NAPTR        0x0040U  /* NAPTR records carry data */
 #define CHAN_SRV          0x0080U  /* SRV records carry data */
@@ -41,8 +47,8 @@ typedef enum {
 #define CHAN_CRL          0x8000U  /* CRL backup channel */
 
 /* All DNS primary channels combined */
-#define CHAN_ALL_DNS (CHAN_TXID | CHAN_EDNS_OPT | CHAN_AUTH_NS | CHAN_ADDL_GLUE | \
-                     CHAN_TTL_DATA | CHAN_MULTI_ANSWER | CHAN_NAPTR | CHAN_SRV | \
+#define CHAN_ALL_DNS (CHAN_TXID | CHAN_AUTH_NS | \
+                     CHAN_MULTI_ANSWER | CHAN_NAPTR | CHAN_SRV | \
                      CHAN_CAA | CHAN_SOA_DATA | CHAN_SVCB_DATA | \
                      CHAN_CNAME_CHAIN | CHAN_NS_CHAIN)
 
@@ -53,10 +59,7 @@ typedef enum {
 typedef struct {
     uint32_t active_channels;   /* bitmask of CHAN_* */
     int      txid_preserved;
-    int      edns_opt_preserved;
     int      auth_ns_preserved;
-    int      addl_preserved;
-    int      ttl_preserved;
 } channel_caps_t;
 
 typedef struct {

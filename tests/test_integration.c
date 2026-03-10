@@ -244,7 +244,7 @@ static void test_channel_negotiation(void)
     transport_ctx_t server_ctx;
     uint16_t        session_id = 0x0042;
     uint32_t        client_chans = CHAN_NAPTR | CHAN_CAA | CHAN_AUTH_NS |
-                                   CHAN_EDNS_OPT | CHAN_SVCB_DATA;
+                                   CHAN_SVCB_DATA;
     uint32_t        server_chans = CHAN_NAPTR | CHAN_SOA_DATA | CHAN_AUTH_NS |
                                    CHAN_SVCB_DATA;
     uint32_t        expected_neg = client_chans & server_chans;
@@ -640,16 +640,15 @@ static void test_upstream_fqdn_pipeline(void)
 }
 
 /* ------------------------------------------------------------------ */
-/* Test 8: Downstream with ALL 7 DNS channels                           */
+/* Test 8: Downstream with all working DNS channels                     */
 /* ------------------------------------------------------------------ */
 
-static void test_all_seven_channels(void)
+static void test_all_working_channels(void)
 {
     transport_ctx_t  server_ctx;
     uint16_t         session_id = 0x00DD;
     uint32_t         channels   = CHAN_NAPTR | CHAN_CAA | CHAN_SOA_DATA |
-                                  CHAN_SRV | CHAN_AUTH_NS | CHAN_ADDL_GLUE |
-                                  CHAN_EDNS_OPT;
+                                  CHAN_SRV | CHAN_AUTH_NS;
     uint8_t          test_data[150];
     uint8_t          pkt[512];
     int              pkt_len;
@@ -666,7 +665,7 @@ static void test_all_seven_channels(void)
 
     fill_seq(test_data, sizeof(test_data));
 
-    /* Server: build transport → pack all 7 channels → DNS wire */
+    /* Server: build transport → pack all working channels → DNS wire */
     transport_init(&server_ctx);
     server_ctx.active_channels = channels;
 
@@ -702,7 +701,7 @@ static void test_all_seven_channels(void)
 
     transport_free(&server_ctx);
 
-    printf("  test_all_seven_channels: OK (%zu bytes through 7 channels)\n",
+    printf("  test_all_working_channels: OK (%zu bytes through 5 channels)\n",
            sizeof(test_data));
 }
 
@@ -919,7 +918,7 @@ static void test_encrypted_transport_pipeline(void)
     transport_ctx_t client_ctx;
     transport_ctx_t server_ctx;
     uint16_t session_id = 0x00FF;
-    uint32_t channels = CHAN_NAPTR | CHAN_CAA | CHAN_EDNS_OPT;
+    uint32_t channels = CHAN_NAPTR | CHAN_CAA;
     uint8_t  test_data[80];
     uint8_t  pkt[512];
     int      pkt_len;
@@ -1233,7 +1232,7 @@ int main(void)
     test_cname_chain_roundtrip();
     test_ns_referral_roundtrip();
     test_upstream_fqdn_pipeline();
-    test_all_seven_channels();
+    test_all_working_channels();
     test_query_type_rotation();
     test_adaptive_window();
     test_config_defaults();

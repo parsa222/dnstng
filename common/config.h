@@ -22,7 +22,6 @@ struct client_config_s {
     uint32_t      active_channels;   /* bitmask of CHAN_* */
     int           cname_chain_depth; /* 0=disabled, 1-8 */
     int           ns_chain_depth;    /* 0=disabled, 1-4 */
-    int           ttl_encoding;      /* 0=disabled, 1=stealth, 2=full */
     char          psk[64];           /* pre-shared key for encryption */
     size_t        psk_len;           /* 0 = no encryption */
     int           lazy_mode;         /* 1 = iodine-style lazy mode */
@@ -43,7 +42,6 @@ struct server_config_s {
     uint32_t    active_channels;    /* bitmask of CHAN_* */
     int         cname_chain_depth;
     int         ns_chain_depth;
-    int         ttl_encoding;
     char        psk[64];            /* pre-shared key for encryption */
     size_t      psk_len;            /* 0 = no encryption */
     int         lazy_mode;          /* 1 = iodine-style lazy mode */

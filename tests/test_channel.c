@@ -83,39 +83,47 @@ static void test_pack_unpack_caa(void)
     printf("  test_pack_unpack_caa: OK (packed %d bytes)\n", result);
 }
 
-static void test_pack_unpack_addl(void)
+static void test_pack_unpack_srv(void)
 {
-    /* Additional A records carry 4 raw bytes each (no header).
-     * Unpack appends them linearly, so we verify just the byte count. */
-    channel_buf_t        cb;
-    uint8_t              data[32]; /* 8 records × 4 bytes */
-    uint8_t              wire[4096];
-    uint8_t              out[256];
-    dns_parsed_response_t parsed;
-    int                  packed;
-    int                  wire_len;
-    int                  unpacked;
+    /* SRV records carry 6 raw bytes each (priority/weight/port).
+     * SRV needs other channels to fill first since the SRV target
+     * domain needs more than just "." — it only works in combination. */
+    uint8_t data[250];
+    int     result;
 
     fill_seq(data, sizeof(data));
-    channel_buf_init(&cb, CHAN_ADDL_GLUE, "example.com");
+    result = roundtrip(CHAN_NAPTR | CHAN_SRV, data, sizeof(data));
+    assert(result > 0);
+    printf("  test_pack_unpack_srv: OK (packed %d bytes with NAPTR+SRV)\n",
+           result);
+}
 
-    packed = channel_pack(&cb, data, sizeof(data));
-    assert(packed > 0);
+static void test_pack_unpack_soa(void)
+{
+    /* SOA record carries data encoded in mname labels.
+     * SOA's labels need at least one valid label to encode,
+     * so we combine with NAPTR for realistic usage. */
+    uint8_t data[300];
+    int     result;
 
-    wire_len = dns_build_response_ext(0xABCD,
-                                       "test.example.com",
-                                       DNS_TYPE_TXT,
-                                       &cb.resp,
-                                       wire, sizeof(wire));
-    assert(wire_len > 0);
+    fill_seq(data, sizeof(data));
+    result = roundtrip(CHAN_NAPTR | CHAN_SOA_DATA, data, sizeof(data));
+    assert(result > 0);
+    printf("  test_pack_unpack_soa: OK (packed %d bytes with NAPTR+SOA)\n",
+           result);
+}
 
-    assert(dns_parse_response_full(wire, (size_t)wire_len, &parsed) == ERR_OK);
+static void test_pack_unpack_auth_ns(void)
+{
+    /* Authority NS names carry base36-encoded data in the first label. */
+    uint8_t data[300];
+    int     result;
 
-    unpacked = channel_unpack(&parsed, CHAN_ADDL_GLUE, out, sizeof(out));
-    assert(unpacked == packed);
-    assert(memcmp(out, data, (size_t)packed) == 0);
-
-    printf("  test_pack_unpack_addl: OK (packed %d bytes)\n", packed);
+    fill_seq(data, sizeof(data));
+    result = roundtrip(CHAN_NAPTR | CHAN_AUTH_NS, data, sizeof(data));
+    assert(result > 0);
+    printf("  test_pack_unpack_auth_ns: OK (packed %d bytes with NAPTR+AUTH_NS)\n",
+           result);
 }
 
 static void test_fragment_reassembly(void)
@@ -168,39 +176,6 @@ static void test_multi_channel(void)
            packed);
 }
 
-static void test_edns_channel(void)
-{
-    channel_buf_t        cb;
-    uint8_t              data[100];
-    uint8_t              wire[4096];
-    uint8_t              out[512];
-    dns_parsed_response_t parsed;
-    int                  packed;
-    int                  wire_len;
-    int                  unpacked;
-
-    fill_seq(data, sizeof(data));
-    channel_buf_init(&cb, CHAN_EDNS_OPT, "example.com");
-
-    packed = channel_pack(&cb, data, sizeof(data));
-    assert(packed > 0);
-
-    wire_len = dns_build_response_ext(0x5555,
-                                       "test.example.com",
-                                       DNS_TYPE_TXT,
-                                       &cb.resp,
-                                       wire, sizeof(wire));
-    assert(wire_len > 0);
-
-    assert(dns_parse_response_full(wire, (size_t)wire_len, &parsed) == ERR_OK);
-
-    unpacked = channel_unpack(&parsed, CHAN_EDNS_OPT, out, sizeof(out));
-    assert(unpacked == packed);
-    assert(memcmp(out, data, (size_t)packed) == 0);
-
-    printf("  test_edns_channel: OK (packed %d bytes)\n", packed);
-}
-
 /* ------------------------------------------------------------------ */
 /* main                                                                 */
 /* ------------------------------------------------------------------ */
@@ -211,10 +186,11 @@ int main(void)
 
     test_pack_unpack_naptr();
     test_pack_unpack_caa();
-    test_pack_unpack_addl();
+    test_pack_unpack_srv();
+    test_pack_unpack_soa();
+    test_pack_unpack_auth_ns();
     test_fragment_reassembly();
     test_multi_channel();
-    test_edns_channel();
 
     printf("test_channel: ALL PASS\n");
     return 0;

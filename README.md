@@ -42,11 +42,11 @@ every available DNS field, and fall back to SMTP/OCSP/CRL if DNS itself is block
 | Capability | iodine | dnscat2 | DnsTNG |
 |---|---|---|---|
 | Record types | NULL/TXT/CNAME/MX/SRV | TXT only | NAPTR, SOA, NULL, TXT, CAA, SRV, CNAME, AAAA, A (auto) |
-| Downstream channels | Single record type | Single TXT record | Answer + Authority NS + Additional glue + TTL bits + EDNS0 |
+| Downstream channels | Single record type | Single TXT record | Answer + Authority NS (multi-channel) |
 | Encoding | Base32/64/128 (auto) | Raw | Base36 (lower entropy) |
 | Bandwidth multiplier | None | None | CNAME chain (up to 8x) + NS referral chain |
 | Fallback if DNS blocked | None | None | SMTP (port 25), OCSP (port 80), CRL (port 80) |
-| Anti-detection | Minimal | None | Jitter, noise queries, query-type rotation, TTL mimicry |
+| Anti-detection | Minimal | None | Jitter, noise queries, query-type rotation |
 | Payload encryption | None | ECDH + Salsa20 | PSK-derived XOR stream cipher |
 | Lazy mode |  (key innovation) | No |  (iodine-inspired) |
 | Adaptive polling |  (auto) | No |  (100ms → 4s ramp) |
@@ -152,7 +152,7 @@ to carry tunnel data. Fields marked with `◄── DATA` carry hidden payload b
 │  Record 2: (same structure, ~500 more bytes)         ◄── DATA       │
 │  Record 3: (same structure, ~500 more bytes)         ◄── DATA       │
 │                                                                      │
-│  Total answer section: ~1500 data bytes + 9 TTL-stego bytes          │
+│  Total answer section: ~1500 data bytes                              │
 └──────────────────────────────────────────────────────────────────────┘
 
 ┌──────────────────────────────────────────────────────────────────────┐
@@ -161,46 +161,45 @@ to carry tunnel data. Fields marked with `◄── DATA` carry hidden payload b
 │  Record 1:                                                           │
 │    NAME: tunnel.example.com                                          │
 │    TYPE: NS                                                          │
-│    TTL:  0x00112233                                   ◄── DATA (3B) │
+│    TTL:  300  (normal, NOT used for data — see note below)           │
 │    RDATA: 7kp2r9x4m.ns0.tunnel.example.com           ◄── DATA      │
 │            ^^^^^^^^^^                                                │
 │            Base36-encoded data chunk in NS name labels               │
 │                                                                      │
 │  Record 2:                                                           │
 │    RDATA: a3b5c7d9.ns1.tunnel.example.com             ◄── DATA      │
-│    TTL:   0x00445566                                  ◄── DATA (3B) │
 │                                                                      │
-│  Total authority section: ~400 data bytes + 6 TTL-stego bytes        │
+│  Total authority section: ~400 data bytes                            │
 └──────────────────────────────────────────────────────────────────────┘
 
-┌──────────────────────────────────────────────────────────────────────┐
-│                    ADDITIONAL SECTION (5 records)                     │
-├──────────────────────────────────────────────────────────────────────┤
-│  Glue A records (4 records):                                         │
-│    ns0.tunnel.example.com  A  0xDE.0xAD.0xBE.0xEF    ◄── DATA (4B) │
-│    ns1.tunnel.example.com  A  0xCA.0xFE.0xBA.0xBE    ◄── DATA (4B) │
-│    ns2.tunnel.example.com  A  0x12.0x34.0x56.0x78    ◄── DATA (4B) │
-│    ns3.tunnel.example.com  A  0x9A.0xBC.0xDE.0xF0    ◄── DATA (4B) │
-│    (IP addresses ARE the data — raw binary)                          │
-│    TTL per record:                                    ◄── DATA (3B) │
-│                                                                      │
-│  EDNS0 OPT record (1 record):                                       │
-│  ┌──────────────────────────────────────────────────────────────┐    │
-│  │  NAME: . (root)   TYPE: OPT (41)   UDP size: 4096           │    │
-│  │  Option Code: 65001 (private/experimental)                   │    │
-│  │  Option Data: <variable length binary>         ◄── DATA      │    │
-│  │               Raw tunnel payload bytes                       │    │
-│  └──────────────────────────────────────────────────────────────┘    │
-│                                                                      │
-│  Total additional section: 16 bytes (glue) + EDNS0 + 12 TTL-stego   │
-└──────────────────────────────────────────────────────────────────────┘
-
-Summary: one DNS response, ~2000+ data bytes hidden across all fields
+Summary: one DNS response, ~1900+ data bytes hidden in answer + authority
 ```
 
-**What the recursive resolver sees:** A perfectly valid DNS response with NAPTR records,
-NS delegation, glue records, and an EDNS0 extension. Every field conforms to the DNS RFC.
-There is nothing syntactically wrong with this packet. The data is hiding in plain sight.
+**Why TTL, Additional glue, and EDNS0 are NOT used:**
+
+Previous DNS tunnel tools (and earlier versions of this codebase) tried to hide data in
+three additional fields. All three are broken in practice:
+
+- **TTL steganography** — Recursive resolvers decrement TTL values by cache age (RFC 2181).
+  If the server writes `0x00A1B2C3` in a TTL, the client sees `0x00A1B2C3 - N` where N is
+  the number of seconds the record was cached. The lower bits — where the data was — are
+  corrupted. This cannot be worked around without error correction that costs more bandwidth
+  than the TTL channel provides.
+
+- **EDNS0 custom option (65001)** — EDNS0 options are hop-by-hop, not end-to-end (RFC 6891
+  §6.1.2). Recursive resolvers process or ignore unknown options but do NOT forward them
+  to clients. Google DNS, Cloudflare, and Quad9 all strip unrecognized EDNS0 options.
+
+- **Additional section glue records** — Recursive resolvers routinely strip Additional section
+  records that don't correspond to NS records in the Authority section. Even when matching NS
+  records exist, resolvers may revalidate or replace glue records with their own cached data.
+
+DnsTNG only uses fields that are guaranteed to survive the resolver → client path: Answer
+section RDATA and Authority section NS names.
+
+**What the recursive resolver sees:** A perfectly valid DNS response with NAPTR records
+and NS delegation. Every field conforms to the DNS RFC. There is nothing syntactically
+wrong with this packet. The data is hiding in plain sight.
 
 **What the IRGFW sees:** DNS traffic on port 53 between a domestic resolver and a foreign
 authoritative nameserver. The query is for an obscure record type (NAPTR) with a normal-looking
@@ -241,27 +240,12 @@ is how multiple small channels combine into one larger effective bandwidth.
 
 #### Multi-Channel Secondary Fields
 
-Beyond the answer records, DnsTNG packs data into additional DNS response fields:
+Beyond the answer records, DnsTNG packs data into the Authority section:
 
 **Authority Section (NS records):**
 Each NS name encodes a chunk of data as base36 labels: `<base36_data>.ns<i>.<domain>`.
 Resolvers are required by the DNS protocol to pass the Authority section through. This gives
 roughly 2 x 200 bytes per response of additional downstream capacity for free.
-
-**Additional Section (Glue A/AAAA records):**
-Glue records' IP addresses carry raw binary data. Four A records = 16 bytes; four AAAA records
-= 64 bytes. Also required to be passed through by resolvers.
-
-**TTL Steganography:**
-The lower 24 bits of each record's TTL field carry 3 bytes of data. The upper 8 bits are kept
-at zero so the TTL stays in a range that looks plausible (0-16 million seconds, which is
-admittedly still suspicious but less so than 0xDEADBEEF). This applies to every record in
-the response: answer, authority, and additional.
-
-**EDNS0 Option 65001:**
-The server includes a custom EDNS0 option (code 65001, in the private/experimental range) with
-downstream data. If the recursive resolver passes unknown EDNS0 options through, this is free
-extra bandwidth.
 
 **Transaction ID:**
 The 16-bit TXID field in the DNS response carries 2 bytes of session sequence metadata.
@@ -715,7 +699,7 @@ The integration test (`test_integration`) covers 15 end-to-end scenarios includi
 - CNAME chain round-trip (3-hop)
 - NS referral round-trip
 - Upstream FQDN encode/decode pipeline
-- All 7 DNS channels simultaneously
+- All working DNS channels simultaneously (NAPTR+CAA+SOA+SRV+AUTH_NS)
 - Query type rotation (TXT → AAAA → A → SRV → NAPTR)
 - Adaptive window sizing (EWMA-based RTT)
 - Config defaults (PSK, lazy_mode, channels)
@@ -746,7 +730,6 @@ log_level = info
 active_channels = auto
 cname_chain_depth = 3
 ns_chain_depth = 2
-ttl_encoding = stealth
 psk = my-secret-tunnel-key
 lazy_mode = 1
 ```
@@ -779,7 +762,6 @@ encode_mode = base36
 active_channels = auto
 cname_chain_depth = 3
 ns_chain_depth = 2
-ttl_encoding = stealth
 psk = my-secret-tunnel-key
 lazy_mode = 1
 smtp_host =
@@ -841,13 +823,10 @@ Running `--check` produces a report like this:
 
 === Multi-Channel Support ===
 [*] Testing multi-channel: TXID                    OK (TXID preserved)
-[*] Testing multi-channel: EDNS0 option            UNKNOWN (requires live server)
 [*] Testing multi-channel: Authority NS            UNKNOWN (requires live server)
-[*] Testing multi-channel: Additional glue         UNKNOWN (requires live server)
-[*] Testing multi-channel: TTL encoding            OK (TTL values preserved)
 
 [*] Measuring RTT.................................... avg 180ms, loss 0%
-[*] Recommended config: NAPTR records, channels: TXID+TTL, window=8
+[*] Recommended config: NAPTR records, channels: TXID, window=8
 [*] Estimated bandwidth: ~1 KB/s up, ~4 KB/s down
 ```
 
@@ -898,8 +877,6 @@ congested ones, without manual tuning.
   (google.com, cloudflare.com, etc.) to blend in with normal DNS traffic.
 - **Entropy management:** Base36 encoding keeps the Shannon entropy of query names lower
   than Base64. Higher entropy is a DPI fingerprint.
-- **TTL mimicry:** In stealth mode, TTL steganography keeps values in a believable range
-  rather than setting them to arbitrary 32-bit integers.
 - **Query type rotation:** Periodically rotates between working record types to avoid
   fixed patterns. Rotates every 30-120 queries (randomized interval) among
   TXT → AAAA → A → SRV → NAPTR.
@@ -1145,9 +1122,9 @@ no packet loss, 100ms RTT). Reality will be worse.
 | TXT only (baseline) | ~20 KB/s | ~10 KB/s |
 | NAPTR single record | ~40 KB/s | ~10 KB/s |
 | NAPTR x4 records | ~160 KB/s | ~10 KB/s |
-| NAPTR + multi-channel | ~200 KB/s | ~15 KB/s |
+| NAPTR + Auth NS | ~180 KB/s | ~15 KB/s |
 | NAPTR + CNAME chain x4 | ~640 KB/s | ~10 KB/s |
-| Full multi-channel + chain | ~800 KB/s | ~20 KB/s |
+| Full multi-channel + chain | ~700 KB/s | ~20 KB/s |
 
 In practice you will get a fraction of these numbers because recursive resolvers cache
 aggressively, strip unknown record types, and generally treat your creativity as a bug.

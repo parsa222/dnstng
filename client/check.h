@@ -18,10 +18,7 @@ typedef struct {
     int    soa_ok;
     int    edns0_ok;
     int    txid_preserved;
-    int    edns_opt_preserved;
     int    auth_ns_preserved;
-    int    addl_preserved;
-    int    ttl_preserved;
     double avg_rtt_ms;
     double loss_pct;
     double est_bw_up_bps;

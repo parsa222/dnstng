@@ -253,26 +253,16 @@ err_t run_full_check(const client_config_t *cfg, check_results_t *results)
 
     /* Multi-channel checks (best-effort — require live tunnel server) */
     results->txid_preserved     = 1;  /* ares always echoes TXID */
-    results->edns_opt_preserved = 0;  /* conservative default */
     results->auth_ns_preserved  = 0;
-    results->addl_preserved     = 0;
-    results->ttl_preserved      = 1;
 
     printf("[*] Testing %-42s %s\n", "multi-channel: TXID",
            "OK (TXID preserved)");
-    printf("[*] Testing %-42s %s\n", "multi-channel: EDNS0 option",
-           "UNKNOWN (requires live tunnel server)");
     printf("[*] Testing %-42s %s\n", "multi-channel: Authority NS",
            "UNKNOWN (requires live tunnel server)");
-    printf("[*] Testing %-42s %s\n", "multi-channel: Additional glue",
-           "UNKNOWN (requires live tunnel server)");
-    printf("[*] Testing %-42s %s\n", "multi-channel: TTL encoding",
-           "OK (TTL values preserved)");
 
     /* Fill caps */
     results->caps.txid_preserved    = results->txid_preserved;
-    results->caps.ttl_preserved     = results->ttl_preserved;
-    results->caps.active_channels   = CHAN_TXID | CHAN_TTL_DATA;
+    results->caps.active_channels   = CHAN_TXID;
 
     /* RTT and loss */
     results->avg_rtt_ms = (rtt_count > 0)

@@ -273,9 +273,12 @@ void channel_buf_init(channel_buf_t *cb, uint32_t active_channels,
     /* Wire up resp pointers */
     cb->resp.answers       = cb->answers;
     cb->resp.auth_ns_names = (const char **)cb->ns_name_ptrs;
-    cb->resp.addl_records  = cb->addl;
+    cb->resp.addl_records  = NULL;
+    cb->resp.num_addl      = 0;
     cb->resp.auth_ns_ttl   = 300;
     cb->resp.edns0_size    = 0;
+    cb->resp.edns_opt_data = NULL;
+    cb->resp.edns_opt_len  = 0;
 }
 
 int channel_pack(channel_buf_t *cb, const uint8_t *data, size_t data_len)
@@ -292,9 +295,7 @@ int channel_pack(channel_buf_t *cb, const uint8_t *data, size_t data_len)
     /* Reset counters */
     cb->num_answers = 0;
     cb->num_ns      = 0;
-    cb->num_addl    = 0;
     cb->rdata_off   = 0;
-    cb->edns_len    = 0;
 
     /* 1. NAPTR: up to 4 records, each carrying up to 240 bytes of data */
     if ((cb->active_channels & CHAN_NAPTR) && packed < data_len
@@ -467,64 +468,7 @@ int channel_pack(channel_buf_t *cb, const uint8_t *data, size_t data_len)
         }
     }
 
-    /* 6. Additional A records: 4 raw bytes each (no fragment header) */
-    if ((cb->active_channels & CHAN_ADDL_GLUE) && packed < data_len) {
-        int ai;
-        for (ai = 0; ai < (int)CHANNEL_MAX_ADDL && packed < data_len
-                 && cb->num_addl < CHANNEL_MAX_ADDL; ai++) {
-            size_t        avail   = data_len - packed;
-            size_t        chunk   = (avail > 4U) ? 4U : avail;
-            uint8_t       ip[4];
-            uint8_t      *rdata;
-            dns_answer_t *addl;
-
-            if (cb->rdata_off + 4U > CHANNEL_RDATA_CAP) {
-                break;
-            }
-            rdata = cb->rdata_buf + cb->rdata_off;
-            memset(ip, 0, sizeof(ip));
-            memcpy(ip, data + packed, chunk);
-            memcpy(rdata, ip, 4U);
-            cb->rdata_off += 4U;
-
-            addl            = &cb->addl[cb->num_addl++];
-            addl->type      = DNS_TYPE_A;
-            addl->rdata     = rdata;
-            addl->rdata_len = 4;
-            addl->ttl       = 300;
-            packed         += chunk;
-        }
-    }
-
-    /* 7. EDNS0: up to 200 bytes of raw data (with 3-byte header) */
-    if ((cb->active_channels & CHAN_EDNS_OPT) && packed < data_len) {
-        size_t avail = data_len - packed;
-        size_t chunk = (avail > 197U) ? 197U : avail;
-
-        frag[0] = (uint8_t)(packed >> 8);
-        frag[1] = (uint8_t)(packed & 0xFFU);
-        frag[2] = (uint8_t)chunk;
-        if (3U + chunk <= sizeof(cb->edns_buf)) {
-            memcpy(cb->edns_buf, frag, 3U);
-            memcpy(cb->edns_buf + 3U, data + packed, chunk);
-            cb->edns_len = 3U + chunk;
-            packed      += chunk;
-        }
-    }
-
-    /* 8. TTL steganography: 3 raw bytes per answer record */
-    if ((cb->active_channels & CHAN_TTL_DATA) && packed < data_len) {
-        size_t ai;
-        for (ai = 0; ai < cb->num_answers && packed + 3U <= data_len; ai++) {
-            cb->answers[ai].ttl =
-                ((uint32_t)data[packed]     << 16) |
-                ((uint32_t)data[packed + 1] <<  8) |
-                 (uint32_t)data[packed + 2];
-            packed += 3;
-        }
-    }
-
-    /* 9. TXT fallback: if nothing has been packed yet */
+    /* 6. TXT fallback: if nothing has been packed yet */
     if (cb->num_answers == 0 && packed < data_len) {
         size_t        avail  = data_len - packed;
         size_t        chunk  = (avail > 255U) ? 255U : avail;
@@ -550,18 +494,11 @@ int channel_pack(channel_buf_t *cb, const uint8_t *data, size_t data_len)
     cb->resp.auth_ns_names = (const char **)cb->ns_name_ptrs;
     cb->resp.num_auth_ns   = cb->num_ns;
     cb->resp.auth_ns_ttl   = 300;
-    cb->resp.addl_records  = cb->addl;
-    cb->resp.num_addl      = cb->num_addl;
-
-    if (cb->edns_len > 0) {
-        cb->resp.edns_opt_data = cb->edns_buf;
-        cb->resp.edns_opt_len  = cb->edns_len;
-        cb->resp.edns0_size    = 4096;
-    } else {
-        cb->resp.edns_opt_data = NULL;
-        cb->resp.edns_opt_len  = 0;
-        cb->resp.edns0_size    = 0;
-    }
+    cb->resp.addl_records  = NULL;
+    cb->resp.num_addl      = 0;
+    cb->resp.edns_opt_data = NULL;
+    cb->resp.edns_opt_len  = 0;
+    cb->resp.edns0_size    = 0;
 
     return (int)packed;
 }
@@ -700,34 +637,6 @@ int channel_unpack(const dns_parsed_response_t *parsed,
             }
             continue;
         }
-
-        /* Additional A records: 4 raw bytes each (no header) */
-        if (rr->section == 2 && rr->type == DNS_TYPE_A
-                && (active_channels & CHAN_ADDL_GLUE)) {
-            if (rr->rdata_len >= 4U && high_water + 4U <= out_cap) {
-                memcpy(out + high_water, rr->rdata, 4U);
-                high_water += 4U;
-            }
-            continue;
-        }
-
-        /* TTL steganography: 3 raw bytes per answer record */
-        if (rr->section == 0 && (active_channels & CHAN_TTL_DATA)) {
-            if (high_water + 3U <= out_cap) {
-                uint32_t t = rr->ttl & 0x00FFFFFFU;
-                out[high_water]     = (uint8_t)(t >> 16);
-                out[high_water + 1] = (uint8_t)(t >>  8);
-                out[high_water + 2] = (uint8_t)(t & 0xFFU);
-                high_water += 3U;
-            }
-            continue;
-        }
-    }
-
-    /* EDNS0 option data */
-    if ((active_channels & CHAN_EDNS_OPT) && parsed->edns_opt_len >= 3U) {
-        place_fragment(parsed->edns_opt, parsed->edns_opt_len, out, out_cap,
-                       &high_water);
     }
 
     return (int)high_water;
