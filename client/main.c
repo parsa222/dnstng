@@ -102,7 +102,8 @@ int main(int argc, char *argv[])
     log_set_level(cfg.log_level);
 
     if (do_check) {
-        return run_connectivity_check(&cfg) == ERR_OK ? 0 : 1;
+        check_results_t results;
+        return run_full_check(&cfg, &results) == ERR_OK ? 0 : 1;
     }
 
     if (do_benchmark) {
