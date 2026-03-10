@@ -103,7 +103,7 @@ const char *const NOISE_DOMAINS[NOISE_DOMAIN_COUNT] = {
     "protonmail.com",    "gmail.com",         "outlook.com",
     "icloud.com",        "office.com",        "drive.google.com",
     "docs.google.com",   "maps.google.com",   "play.google.com",
-    "store.steampowered.com", "epicgames.com","roblox.com",
+    "store.steampowered.com", "epicgames.com", "roblox.com",
     "twitch.tv",         "youtube.com",       "vimeo.com",
     "dailymotion.com",   "soundcloud.com",    "bandcamp.com",
     "flickr.com",        "imgur.com",         "giphy.com",

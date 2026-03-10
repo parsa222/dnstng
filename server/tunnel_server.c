@@ -251,16 +251,16 @@ static void on_dns_query(uint16_t query_id, const char *fqdn,
                                       NULL, 0, pkt_buf, sizeof(pkt_buf));
     if (pkt_len > 0) {
         char  resp_labels[512];
-        int   llen;
+        int   encoded_labels_len;
         uint8_t resp_data[512];
         int     resp_data_len;
 
-        llen = encode_to_labels(pkt_buf, (size_t)pkt_len,
+        encoded_labels_len = encode_to_labels(pkt_buf, (size_t)pkt_len,
                                   resp_labels, sizeof(resp_labels),
                                   ENCODE_BASE32);
 
-        if (llen > 0) {
-            resp_data_len = llen;
+        if (encoded_labels_len > 0) {
+            resp_data_len = encoded_labels_len;
             if (resp_data_len > (int)sizeof(resp_data)) {
                 resp_data_len = (int)sizeof(resp_data);
             }

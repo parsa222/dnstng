@@ -150,6 +150,9 @@ static void bench_poll_cb(uv_timer_t *timer)
 
 err_t run_benchmark(const client_config_t *cfg, int duration_secs)
 {
+    if (duration_secs <= 0) {
+        return ERR_INVAL;
+    }
     ares_channel  ch;
     struct ares_options opts;
     int           optmask = 0;
