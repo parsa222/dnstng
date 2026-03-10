@@ -41,7 +41,7 @@ err_t transport_init(transport_ctx_t *ctx)
     memset(ctx, 0, sizeof(*ctx));
 
     /* Random ISN (dnscat2-inspired: randomize to prevent session hijacking) */
-    ctx->next_seq = (uint16_t)(stealth_rand32() & 0xFFFFU);
+    ctx->next_seq = (uint16_t)stealth_rand32();
     ctx->recv_seq = 0;
     ctx->ack_seq  = 0;
 

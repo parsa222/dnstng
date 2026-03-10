@@ -368,7 +368,7 @@ static void on_dns_query(uint16_t query_id, const char *fqdn,
     int               pkt_len;
     const char       *suffix_check;
     int               is_syn  = 0;
-    int               has_data = 0; /* did this query carry tunnel data? */
+    int               parsed_tunnel_data = 0; /* query contained decoded tunnel payload */
 
     /* Is this a "check" query? */
     suffix_check = strstr(fqdn, "check.t.");
@@ -406,7 +406,7 @@ static void on_dns_query(uint16_t query_id, const char *fqdn,
             size_t           payload_len;
             err_t            e;
 
-            has_data = 1;
+            parsed_tunnel_data = 1;
 
             e = transport_parse_packet(decoded, (size_t)dec_len,
                                         &hdr, &payload, &payload_len);
@@ -489,7 +489,7 @@ static void on_dns_query(uint16_t query_id, const char *fqdn,
     }
 
     /* DATA/FIN: respond immediately with ACK */
-    if (has_data) {
+    if (parsed_tunnel_data) {
         pkt_len = transport_build_packet(&sess->transport, session_id,
                                           TUNNEL_FLAG_ACK,
                                           NULL, 0, pkt_buf, sizeof(pkt_buf));
