@@ -72,9 +72,9 @@ static int parse_tunnel_fqdn(const char *fqdn, const char *domain,
     dot = NULL;
     {
         const char *scan = suffix_start - 1;
-        while (scan > fqdn) {
-            scan--;
+        while (scan >= fqdn) {
             if (*scan == '.') { dot = scan; break; }
+            scan--;
         }
     }
 
