@@ -448,6 +448,27 @@ static void poll_timer_cb(uv_timer_t *timer)
         if (pkt_len > 0) {
             send_dns_query(tc, pkt, (size_t)pkt_len, 0);
         }
+
+        /* Adaptive poll interval (iodine-inspired):
+         * When idle (no data being sent), slowly ramp up the poll
+         * interval to reduce DNS query rate and avoid detection.
+         * When data is flowing, drop back to minimum interval. */
+        tc->idle_polls++;
+        if (tc->poll_interval_ms < POLL_MAX_MS) {
+            tc->poll_interval_ms += POLL_RAMP_STEP;
+            if (tc->poll_interval_ms > POLL_MAX_MS) {
+                tc->poll_interval_ms = POLL_MAX_MS;
+            }
+            /* Re-arm timer with new interval */
+            uv_timer_set_repeat(&tc->poll_timer, tc->poll_interval_ms);
+        }
+    } else {
+        /* Data flowing: reset to minimum interval */
+        if (tc->idle_polls > 0) {
+            tc->idle_polls = 0;
+            tc->poll_interval_ms = POLL_MIN_MS;
+            uv_timer_set_repeat(&tc->poll_timer, tc->poll_interval_ms);
+        }
     }
 }
 
@@ -586,6 +607,18 @@ err_t tunnel_client_init(tunnel_client_t *tc, uv_loop_t *loop,
 
     transport_init(&tc->transport);
 
+    /* Set up PSK encryption if configured (dnscat2-inspired) */
+    if (cfg->psk_len > 0) {
+        transport_set_psk(&tc->transport,
+                          (const uint8_t *)cfg->psk, cfg->psk_len);
+        LOG_INFO("PSK encryption enabled (%zu-byte key)", cfg->psk_len);
+    }
+
+    /* Adaptive poll interval defaults */
+    tc->poll_interval_ms  = POLL_MIN_MS;
+    tc->last_data_recv_ms = get_time_ms();
+    tc->idle_polls        = 0;
+
     /* Init c-ares */
     memset(&opts, 0, sizeof(opts));
     r = ares_init_options(&tc->ares, &opts, optmask);
@@ -616,7 +649,7 @@ err_t tunnel_client_start(tunnel_client_t *tc)
     uv_timer_init(tc->loop, &tc->poll_timer);
     tc->poll_timer.data = tc;
     uv_timer_start(&tc->poll_timer, poll_timer_cb,
-                   0, (uint64_t)POLL_INTERVAL_MS);
+                   0, tc->poll_interval_ms);
 
     uv_timer_init(tc->loop, &tc->retransmit_timer);
     tc->retransmit_timer.data = tc;

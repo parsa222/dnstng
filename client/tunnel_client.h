@@ -8,8 +8,14 @@
 #include "socks5.h"
 
 #define MAX_STREAMS      256
-#define POLL_INTERVAL_MS 50
 #define MAX_RETRIES      5
+
+/* Adaptive poll interval bounds (iodine-inspired).
+ * Starts at POLL_MIN_MS, ramps up to POLL_MAX_MS when idle,
+ * drops back to POLL_MIN_MS when data is flowing. */
+#define POLL_MIN_MS      100
+#define POLL_MAX_MS      4000
+#define POLL_RAMP_STEP   50   /* ms added per idle poll */
 
 typedef enum {
     SESSION_INIT = 0,
@@ -41,6 +47,10 @@ typedef struct tunnel_client_s {
     uv_timer_t       poll_timer;
     uv_timer_t       retransmit_timer;
     int              ares_fd;
+    /* Adaptive poll interval (TODO #8, iodine-inspired) */
+    uint64_t         poll_interval_ms;   /* current poll interval */
+    uint64_t         last_data_recv_ms;  /* last time data was received */
+    int              idle_polls;         /* consecutive polls with no data */
 } tunnel_client_t;
 
 err_t tunnel_client_init(tunnel_client_t *tc, uv_loop_t *loop,
