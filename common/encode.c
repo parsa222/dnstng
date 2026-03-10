@@ -5,10 +5,16 @@
 /* Base32 RFC 4648 lowercase alphabet */
 static const char BASE32_ALPHA[33] = "abcdefghijklmnopqrstuvwxyz234567";
 
-/* Base36 mode: hex-encoding (base16) with lowercase hex digits.
- * Each input byte encodes to 2 output characters from 0-9a-f.
- * Simple, correct, and DNS-label safe. */
-static const char HEX_ALPHA[17] = "0123456789abcdef";
+/* Base36 alphabet: [0-9a-z] — 36 chars, DNS-label safe, case-insensitive.
+ * 5 bytes → 8 base36 chars (36^8 > 2^40).  20% more efficient than hex. */
+static const char B36_ALPHA[37] = "0123456789abcdefghijklmnopqrstuvwxyz";
+
+/* Number of base36 output chars required for k input bytes (k = 0..5). */
+static const int B36_CHARS_FOR_BYTES[6] = { 0, 2, 4, 5, 7, 8 };
+
+/* Bytes produced by a partial trailing group of r chars (r = in_len % 8).
+ * -1 means that remainder length is invalid. */
+static const int B36_BYTES_FOR_CHARS_REM[8] = { 0, -1, 1, -1, 2, 3, -1, 4 };
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                              */
@@ -28,16 +34,16 @@ static int base32_char_value(char c)
     return -1;
 }
 
-static int hex_char_value(char c)
+static int b36_char_value(char c)
 {
     if (c >= '0' && c <= '9') {
         return c - '0';
     }
-    if (c >= 'a' && c <= 'f') {
-        return (c - 'a') + 10;
+    if (c >= 'a' && c <= 'z') {
+        return 10 + (c - 'a');
     }
-    if (c >= 'A' && c <= 'F') {
-        return (c - 'A') + 10;
+    if (c >= 'A' && c <= 'Z') {
+        return 10 + (c - 'A'); /* accept uppercase for robustness */
     }
     return -1;
 }
@@ -178,50 +184,136 @@ static int b32_decode(const char *in, size_t in_len,
 }
 
 /* ------------------------------------------------------------------ */
-/* Hex encode/decode (used for ENCODE_BASE36 mode)                     */
+/* Base36 encode/decode                                                 */
 /* ------------------------------------------------------------------ */
 
-static int hex_encode(const uint8_t *in, size_t in_len,
-                      char *out, size_t out_cap)
+/* Write nchars base36 digits of val into out[0..nchars-1], big-endian. */
+static void encode_b36_group(uint64_t val, int nchars, char *out)
 {
-    size_t i;
-
-    if (out_cap < in_len * 2 + 1) {
-        return -1;
+    int i;
+    for (i = nchars - 1; i >= 0; i--) {
+        out[i] = B36_ALPHA[val % 36U];
+        val    /= 36U;
     }
-
-    for (i = 0; i < in_len; i++) {
-        out[i * 2]     = HEX_ALPHA[(in[i] >> 4) & 0x0FU];
-        out[i * 2 + 1] = HEX_ALPHA[in[i] & 0x0FU];
-    }
-
-    out[in_len * 2] = '\0';
-    return (int)(in_len * 2);
 }
 
-static int hex_decode(const char *in, size_t in_len,
-                      uint8_t *out, size_t out_cap)
+/* Read nchars base36 digits from in[0..nchars-1] into *val_out.
+ * Returns 0 on success, -1 if a character is not a valid base36 digit. */
+static int decode_b36_group(const char *in, int nchars, uint64_t *val_out)
 {
-    size_t i;
-
-    if (in_len % 2 != 0) {
-        return -1;
-    }
-    if (out_cap < in_len / 2) {
-        return -1;
-    }
-
-    for (i = 0; i < in_len; i += 2) {
-        int hi = hex_char_value(in[i]);
-        int lo = hex_char_value(in[i + 1]);
-
-        if (hi < 0 || lo < 0) {
+    uint64_t val = 0;
+    int      i;
+    for (i = 0; i < nchars; i++) {
+        int cv = b36_char_value(in[i]);
+        if (cv < 0) {
             return -1;
         }
-        out[i / 2] = (uint8_t)((hi << 4) | lo);
+        val = val * 36U + (uint64_t)cv;
+    }
+    *val_out = val;
+    return 0;
+}
+
+static int b36_encode(const uint8_t *in, size_t in_len,
+                      char *out, size_t out_cap)
+{
+    size_t i = 0;
+    size_t j = 0;
+
+    if (in_len == 0) {
+        if (out_cap < 1) {
+            return -1;
+        }
+        out[0] = '\0';
+        return 0;
     }
 
-    return (int)(in_len / 2);
+    while (i < in_len) {
+        size_t   rem   = in_len - i;
+        size_t   group = (rem > 5U) ? 5U : rem;
+        size_t   k;
+        uint64_t val   = 0;
+        int      nchars;
+
+        for (k = 0; k < group; k++) {
+            val = (val << 8) | in[i + k];
+        }
+
+        nchars = B36_CHARS_FOR_BYTES[group];
+        if (j + (size_t)nchars + 1U > out_cap) {
+            return -1;
+        }
+        encode_b36_group(val, nchars, out + j);
+        j += (size_t)nchars;
+        i += group;
+    }
+
+    out[j] = '\0';
+    return (int)j;
+}
+
+static int b36_decode(const char *in, size_t in_len,
+                      uint8_t *out, size_t out_cap)
+{
+    int    rem_bytes;
+    size_t full_groups;
+    size_t last_bytes;
+    size_t total_out;
+    size_t g;
+    size_t i;
+    size_t j;
+
+    if (in_len == 0) {
+        return 0;
+    }
+
+    rem_bytes = B36_BYTES_FOR_CHARS_REM[in_len % 8U];
+    if (rem_bytes < 0) {
+        return -1; /* invalid encoded string length */
+    }
+
+    full_groups = in_len / 8U;
+    last_bytes  = (size_t)rem_bytes;
+    total_out   = full_groups * 5U + last_bytes;
+
+    if (out_cap < total_out) {
+        return -1;
+    }
+
+    i = 0;
+    j = 0;
+
+    for (g = 0; g < full_groups; g++) {
+        uint64_t val = 0;
+        int      k;
+
+        if (decode_b36_group(in + i, 8, &val) < 0) {
+            return -1;
+        }
+        /* Extract 5 bytes big-endian */
+        for (k = 4; k >= 0; k--) {
+            out[j + (size_t)k] = (uint8_t)(val & 0xFFU);
+            val >>= 8;
+        }
+        i += 8U;
+        j += 5U;
+    }
+
+    if (last_bytes > 0U) {
+        int      nchars = B36_CHARS_FOR_BYTES[last_bytes];
+        uint64_t val    = 0;
+        int      k;
+
+        if (decode_b36_group(in + i, nchars, &val) < 0) {
+            return -1;
+        }
+        for (k = (int)last_bytes - 1; k >= 0; k--) {
+            out[j + (size_t)k] = (uint8_t)(val & 0xFFU);
+            val >>= 8;
+        }
+    }
+
+    return (int)total_out;
 }
 
 /* ------------------------------------------------------------------ */
@@ -243,7 +335,7 @@ int encode_data(const uint8_t *in, size_t in_len,
     if (mode == ENCODE_BASE32) {
         return b32_encode(in, in_len, out, out_cap);
     }
-    return hex_encode(in, in_len, out, out_cap);
+    return b36_encode(in, in_len, out, out_cap);
 }
 
 int decode_data(const char *in, size_t in_len,
@@ -256,7 +348,7 @@ int decode_data(const char *in, size_t in_len,
     if (mode == ENCODE_BASE32) {
         return b32_decode(in, in_len, out, out_cap);
     }
-    return hex_decode(in, in_len, out, out_cap);
+    return b36_decode(in, in_len, out, out_cap);
 }
 
 /* Split encoded string into DNS labels of at most 63 chars each,

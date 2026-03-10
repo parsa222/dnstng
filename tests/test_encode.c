@@ -31,17 +31,49 @@ static void test_base36_roundtrip(void)
     uint8_t decoded[32];
     int     enc_len;
     int     dec_len;
+    size_t  k;
 
     enc_len = encode_data(input, sizeof(input), encoded, sizeof(encoded),
                            ENCODE_BASE36);
-    assert(enc_len > 0);
+    /* 5 bytes → exactly 8 base36 chars (20% more efficient than hex's 10) */
+    assert(enc_len == 8);
     printf("  base36 encoded: %s (len=%d)\n", encoded, enc_len);
+
+    /* Verify all chars are in [0-9a-z] */
+    for (k = 0; k < (size_t)enc_len; k++) {
+        char c = encoded[k];
+        assert((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z'));
+    }
 
     dec_len = decode_data(encoded, (size_t)enc_len, decoded, sizeof(decoded),
                            ENCODE_BASE36);
     assert(dec_len == (int)sizeof(input));
     assert(memcmp(input, decoded, sizeof(input)) == 0);
     printf("  base36 decode matches input\n");
+}
+
+static void test_base36_partial_groups(void)
+{
+    /* Test encoding of 1, 2, 3, 4 bytes (partial groups) */
+    static const int expected_chars[5] = { 0, 2, 4, 5, 7 };
+    uint8_t  input[4] = { 0xAB, 0xCD, 0xEF, 0x01 };
+    char     encoded[32];
+    uint8_t  decoded[8];
+    int      n;
+
+    for (n = 1; n <= 4; n++) {
+        int enc_len = encode_data(input, (size_t)n, encoded, sizeof(encoded),
+                                   ENCODE_BASE36);
+        assert(enc_len == expected_chars[n]);
+        printf("  base36 %d byte(s) → %d chars: %.*s\n",
+               n, enc_len, enc_len, encoded);
+
+        int dec_len = decode_data(encoded, (size_t)enc_len, decoded,
+                                   sizeof(decoded), ENCODE_BASE36);
+        assert(dec_len == n);
+        assert(memcmp(input, decoded, (size_t)n) == 0);
+    }
+    printf("  base36 partial groups: ok\n");
 }
 
 static void test_empty_input(void)
@@ -148,8 +180,11 @@ int main(void)
     printf("[1] base32 round-trip\n");
     test_base32_roundtrip();
 
-    printf("[2] base36 (hex) round-trip\n");
+    printf("[2] base36 round-trip\n");
     test_base36_roundtrip();
+
+    printf("[2b] base36 partial groups\n");
+    test_base36_partial_groups();
 
     printf("[3] empty input\n");
     test_empty_input();

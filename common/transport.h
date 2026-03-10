@@ -48,6 +48,7 @@ typedef struct {
     uint16_t    next_seq;
     uint16_t    ack_seq;
     uint16_t    recv_seq;
+    uint32_t    active_channels;  /* bitmask of CHAN_* from dns_packet.h */
 } transport_ctx_t;
 
 err_t    transport_init(transport_ctx_t *ctx);
