@@ -1,5 +1,6 @@
 #include "crl_channel.h"
 #include "encode.h"
+#include "log.h"
 #include "util.h"
 #include <string.h>
 #include <stdio.h>
@@ -226,8 +227,14 @@ err_t crl_channel_send(crl_channel_t *ch,
     ch->send_len = (size_t)n;
 
     uvbuf = uv_buf_init((char *)ch->send_buf, (unsigned int)ch->send_len);
-    uv_write(&ch->write_req, (uv_stream_t *)&ch->tcp, &uvbuf, 1,
-             crl_write_cb);
+    {
+        int r = uv_write(&ch->write_req, (uv_stream_t *)&ch->tcp, &uvbuf, 1,
+                          crl_write_cb);
+        if (r < 0) {
+            LOG_WARN("crl_channel_send: uv_write failed: %s", uv_strerror(r));
+            return ERR_IO;
+        }
+    }
     return ERR_OK;
 }
 

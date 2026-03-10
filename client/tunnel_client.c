@@ -348,6 +348,7 @@ static void send_dns_query(tunnel_client_t *tc, const uint8_t *pkt,
 
     qctx = (query_ctx_t *)malloc(sizeof(query_ctx_t));
     if (!qctx) {
+        LOG_ERROR("tunnel_client: out of memory for query context");
         return;
     }
     qctx->tc        = tc;

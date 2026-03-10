@@ -40,10 +40,9 @@ void config_client_defaults(client_config_t *cfg)
     cfg->listen_port      = 1080;
     cfg->log_level        = LOG_INFO;
     cfg->encode_mode      = ENCODE_BASE32;
-    cfg->active_channels  = CHAN_ALL_DNS | CHAN_TXID | CHAN_EDNS_OPT;
+    cfg->active_channels  = CHAN_ALL_DNS | CHAN_TXID;
     cfg->cname_chain_depth = 3;
     cfg->ns_chain_depth   = 2;
-    cfg->ttl_encoding     = 1; /* stealth */
     cfg->smtp_port        = 25;
     cfg->ocsp_port        = 80;
     cfg->crl_port         = 80;
@@ -62,7 +61,6 @@ void config_server_defaults(server_config_t *cfg)
     cfg->active_channels   = CHAN_ALL_DNS;
     cfg->cname_chain_depth = 3;
     cfg->ns_chain_depth    = 2;
-    cfg->ttl_encoding      = 1;
     cfg->psk_len           = 0;  /* no encryption by default */
     cfg->lazy_mode         = 1;  /* iodine-style lazy mode on by default */
 }
@@ -149,8 +147,6 @@ static void client_kv(const char *key, const char *val, void *ud)
         cfg->cname_chain_depth = atoi(val);
     } else if (strcmp(key, "ns_chain_depth") == 0) {
         cfg->ns_chain_depth = atoi(val);
-    } else if (strcmp(key, "ttl_encoding") == 0) {
-        cfg->ttl_encoding = atoi(val);
     } else if (strcmp(key, "smtp_host") == 0) {
         strncpy(cfg->smtp_host, val, sizeof(cfg->smtp_host) - 1);
     } else if (strcmp(key, "smtp_port") == 0) {
@@ -204,8 +200,6 @@ static void server_kv(const char *key, const char *val, void *ud)
         cfg->cname_chain_depth = atoi(val);
     } else if (strcmp(key, "ns_chain_depth") == 0) {
         cfg->ns_chain_depth = atoi(val);
-    } else if (strcmp(key, "ttl_encoding") == 0) {
-        cfg->ttl_encoding = atoi(val);
     } else if (strcmp(key, "psk") == 0) {
         size_t vlen = strlen(val);
         if (vlen > sizeof(cfg->psk) - 1) {

@@ -6,7 +6,6 @@
 
 #define CHANNEL_MAX_ANSWERS 16
 #define CHANNEL_MAX_NS       8
-#define CHANNEL_MAX_ADDL     8
 #define CHANNEL_RDATA_CAP   8192
 
 /*
@@ -19,12 +18,8 @@ typedef struct {
     char          ns_names[CHANNEL_MAX_NS][256];
     const char   *ns_name_ptrs[CHANNEL_MAX_NS];
     size_t        num_ns;
-    dns_answer_t  addl[CHANNEL_MAX_ADDL];
-    size_t        num_addl;
     uint8_t       rdata_buf[CHANNEL_RDATA_CAP];  /* scratch space for rdata */
     size_t        rdata_off;
-    uint8_t       edns_buf[512];
-    size_t        edns_len;
     dns_response_ext_t resp;  /* points into the arrays above */
     /* Internal state set by channel_buf_init */
     uint32_t      active_channels;

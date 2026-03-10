@@ -34,7 +34,12 @@ static void alloc_cb(uv_handle_t *handle, size_t suggested_size,
 {
     (void)handle;
     buf->base = (char *)malloc(suggested_size);
-    buf->len  = buf->base ? suggested_size : 0;
+    if (!buf->base) {
+        LOG_WARN("proxy alloc_cb: malloc(%zu) failed", suggested_size);
+        buf->len = 0;
+    } else {
+        buf->len = suggested_size;
+    }
 }
 
 static void read_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf)
@@ -184,7 +189,16 @@ err_t proxy_send(proxy_t *proxy, uint16_t stream_id,
     memcpy(wr->buf, data, len);
     buf = uv_buf_init((char *)wr->buf, (unsigned int)len);
 
-    uv_write(&wr->req, (uv_stream_t *)&conn->tcp, &buf, 1, write_done_cb);
+    {
+        int r = uv_write(&wr->req, (uv_stream_t *)&conn->tcp, &buf, 1,
+                          write_done_cb);
+        if (r < 0) {
+            LOG_WARN("proxy_send: uv_write failed: %s", uv_strerror(r));
+            free(wr->buf);
+            free(wr);
+            return ERR_IO;
+        }
+    }
     return ERR_OK;
 }
 
