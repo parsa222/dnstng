@@ -1,6 +1,5 @@
 # Build a DNS Tunnel Tool in C — Full Spec
 
-
 ## Goal
 Build a **bidirectional DNS tunneling system** with a **client** (runs inside a censored network) and a **server** (runs on an authoritative DNS nameserver outside the censored network). The purpose is to tunnel arbitrary TCP traffic (SOCKS5 proxy) over DNS queries through recursive resolvers that the client can reach.
 
