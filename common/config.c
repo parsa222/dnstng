@@ -37,9 +37,16 @@ void config_client_defaults(client_config_t *cfg)
     strncpy(cfg->domain,      "tunnel.example.com", sizeof(cfg->domain) - 1);
     strncpy(cfg->resolver,    "8.8.8.8",            sizeof(cfg->resolver) - 1);
     strncpy(cfg->listen_addr, "127.0.0.1",          sizeof(cfg->listen_addr) - 1);
-    cfg->listen_port  = 1080;
-    cfg->log_level    = LOG_INFO;
-    cfg->encode_mode  = ENCODE_BASE32;
+    cfg->listen_port      = 1080;
+    cfg->log_level        = LOG_INFO;
+    cfg->encode_mode      = ENCODE_BASE32;
+    cfg->active_channels  = CHAN_ALL_DNS | CHAN_TXID | CHAN_EDNS_OPT;
+    cfg->cname_chain_depth = 3;
+    cfg->ns_chain_depth   = 2;
+    cfg->ttl_encoding     = 1; /* stealth */
+    cfg->smtp_port        = 25;
+    cfg->ocsp_port        = 80;
+    cfg->crl_port         = 80;
 }
 
 void config_server_defaults(server_config_t *cfg)
@@ -48,8 +55,12 @@ void config_server_defaults(server_config_t *cfg)
     strncpy(cfg->domain,       "tunnel.example.com", sizeof(cfg->domain) - 1);
     strncpy(cfg->bind_addr,    "0.0.0.0",            sizeof(cfg->bind_addr) - 1);
     strncpy(cfg->upstream_dns, "8.8.8.8",            sizeof(cfg->upstream_dns) - 1);
-    cfg->bind_port  = 53;
-    cfg->log_level  = LOG_INFO;
+    cfg->bind_port         = 53;
+    cfg->log_level         = LOG_INFO;
+    cfg->active_channels   = CHAN_ALL_DNS;
+    cfg->cname_chain_depth = 3;
+    cfg->ns_chain_depth    = 2;
+    cfg->ttl_encoding      = 1;
 }
 
 /* Generic key=value parser.  Calls set_kv for each pair found.
@@ -128,6 +139,26 @@ static void client_kv(const char *key, const char *val, void *ud)
         cfg->encode_mode = (strcmp(val, "base32") == 0)
                                ? ENCODE_BASE32
                                : ENCODE_BASE36;
+    } else if (strcmp(key, "active_channels") == 0) {
+        cfg->active_channels = (uint32_t)strtoul(val, NULL, 0);
+    } else if (strcmp(key, "cname_chain_depth") == 0) {
+        cfg->cname_chain_depth = atoi(val);
+    } else if (strcmp(key, "ns_chain_depth") == 0) {
+        cfg->ns_chain_depth = atoi(val);
+    } else if (strcmp(key, "ttl_encoding") == 0) {
+        cfg->ttl_encoding = atoi(val);
+    } else if (strcmp(key, "smtp_host") == 0) {
+        strncpy(cfg->smtp_host, val, sizeof(cfg->smtp_host) - 1);
+    } else if (strcmp(key, "smtp_port") == 0) {
+        cfg->smtp_port = (uint16_t)atoi(val);
+    } else if (strcmp(key, "ocsp_host") == 0) {
+        strncpy(cfg->ocsp_host, val, sizeof(cfg->ocsp_host) - 1);
+    } else if (strcmp(key, "ocsp_port") == 0) {
+        cfg->ocsp_port = (uint16_t)atoi(val);
+    } else if (strcmp(key, "crl_host") == 0) {
+        strncpy(cfg->crl_host, val, sizeof(cfg->crl_host) - 1);
+    } else if (strcmp(key, "crl_port") == 0) {
+        cfg->crl_port = (uint16_t)atoi(val);
     }
 }
 
@@ -153,6 +184,14 @@ static void server_kv(const char *key, const char *val, void *ud)
         } else {
             cfg->log_level = LOG_INFO;
         }
+    } else if (strcmp(key, "active_channels") == 0) {
+        cfg->active_channels = (uint32_t)strtoul(val, NULL, 0);
+    } else if (strcmp(key, "cname_chain_depth") == 0) {
+        cfg->cname_chain_depth = atoi(val);
+    } else if (strcmp(key, "ns_chain_depth") == 0) {
+        cfg->ns_chain_depth = atoi(val);
+    } else if (strcmp(key, "ttl_encoding") == 0) {
+        cfg->ttl_encoding = atoi(val);
     }
 }
 

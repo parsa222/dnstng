@@ -23,12 +23,31 @@ typedef enum {
 #define EDNS0_TUNNEL_OPTION 65001U
 
 /* Multi-channel capabilities bit flags */
-#define CHAN_TXID         0x01U  /* TXID carries upstream data */
-#define CHAN_EDNS_OPT     0x02U  /* EDNS0 custom option carries upstream data */
-#define CHAN_AUTH_NS      0x04U  /* Authority NS names carry downstream data */
-#define CHAN_ADDL_GLUE    0x08U  /* Additional glue records carry downstream data */
-#define CHAN_TTL_DATA     0x10U  /* TTL fields carry downstream data */
-#define CHAN_MULTI_ANSWER 0x20U  /* Multiple answer records */
+#define CHAN_TXID         0x01U    /* TXID carries upstream data */
+#define CHAN_EDNS_OPT     0x02U    /* EDNS0 custom option carries upstream data */
+#define CHAN_AUTH_NS      0x04U    /* Authority NS names carry downstream data */
+#define CHAN_ADDL_GLUE    0x08U    /* Additional glue records carry downstream data */
+#define CHAN_TTL_DATA     0x10U    /* TTL fields carry downstream data */
+#define CHAN_MULTI_ANSWER 0x20U    /* Multiple answer records */
+#define CHAN_NAPTR        0x0040U  /* NAPTR records carry data */
+#define CHAN_SRV          0x0080U  /* SRV records carry data */
+#define CHAN_CAA          0x0100U  /* CAA records carry data */
+#define CHAN_SOA_DATA     0x0200U  /* SOA record carries data */
+#define CHAN_SVCB_DATA    0x0400U  /* SVCB/HTTPS records carry data */
+#define CHAN_CNAME_CHAIN  0x0800U  /* CNAME chaining enabled */
+#define CHAN_NS_CHAIN     0x1000U  /* NS referral chaining enabled */
+#define CHAN_SMTP         0x2000U  /* SMTP backup channel */
+#define CHAN_OCSP         0x4000U  /* OCSP backup channel */
+#define CHAN_CRL          0x8000U  /* CRL backup channel */
+
+/* All DNS primary channels combined */
+#define CHAN_ALL_DNS (CHAN_TXID | CHAN_EDNS_OPT | CHAN_AUTH_NS | CHAN_ADDL_GLUE | \
+                     CHAN_TTL_DATA | CHAN_MULTI_ANSWER | CHAN_NAPTR | CHAN_SRV | \
+                     CHAN_CAA | CHAN_SOA_DATA | CHAN_SVCB_DATA | \
+                     CHAN_CNAME_CHAIN | CHAN_NS_CHAIN)
+
+/* All backup channels */
+#define CHAN_ALL_BACKUP (CHAN_SMTP | CHAN_OCSP | CHAN_CRL)
 
 /* Channel probe result */
 typedef struct {
@@ -152,3 +171,10 @@ int dns_build_soa_rdata(const char *mname, const char *rname,
                         uint32_t retry, uint32_t expire,
                         uint32_t minimum,
                         uint8_t *out, size_t out_cap);
+
+int dns_build_svcb_rdata(uint16_t priority, const char *target,
+                         const uint8_t *params, size_t params_len,
+                         uint8_t *out, size_t out_cap);
+
+int dns_build_hinfo_rdata(const char *cpu, const char *os,
+                          uint8_t *out, size_t out_cap);
