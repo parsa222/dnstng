@@ -56,3 +56,10 @@ target_include_directories(test_chain PRIVATE
     common server third_party ${LIBUV_INCLUDE_DIRS} ${CARES_INCLUDE_DIRS})
 target_link_libraries(test_chain common_lib)
 add_test(NAME test_chain COMMAND test_chain)
+
+# test_integration needs server/chain.c
+add_executable(test_integration tests/test_integration.c server/chain.c)
+target_include_directories(test_integration PRIVATE
+    common server third_party ${LIBUV_INCLUDE_DIRS} ${CARES_INCLUDE_DIRS})
+target_link_libraries(test_integration common_lib)
+add_test(NAME test_integration COMMAND test_integration)

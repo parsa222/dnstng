@@ -34,7 +34,7 @@ static void trim(char *s)
 void config_client_defaults(client_config_t *cfg)
 {
     memset(cfg, 0, sizeof(*cfg));
-    strncpy(cfg->domain,      "tunnel.example.com", sizeof(cfg->domain) - 1);
+    strncpy(cfg->domain,      "example.com", sizeof(cfg->domain) - 1);
     strncpy(cfg->resolver,    "8.8.8.8",            sizeof(cfg->resolver) - 1);
     strncpy(cfg->listen_addr, "127.0.0.1",          sizeof(cfg->listen_addr) - 1);
     cfg->listen_port      = 1080;
@@ -52,7 +52,7 @@ void config_client_defaults(client_config_t *cfg)
 void config_server_defaults(server_config_t *cfg)
 {
     memset(cfg, 0, sizeof(*cfg));
-    strncpy(cfg->domain,       "tunnel.example.com", sizeof(cfg->domain) - 1);
+    strncpy(cfg->domain,       "example.com", sizeof(cfg->domain) - 1);
     strncpy(cfg->bind_addr,    "0.0.0.0",            sizeof(cfg->bind_addr) - 1);
     strncpy(cfg->upstream_dns, "8.8.8.8",            sizeof(cfg->upstream_dns) - 1);
     cfg->bind_port         = 53;

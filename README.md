@@ -83,7 +83,7 @@ Data travels upstream encoded in the subdomain labels of the DNS query FQDN:
 <base36_data>.<session_id_hex>.t.<tunnel_domain>
 ```
 
-Example: `3x9kp2r.0042.t.tunnel.example.com`
+Example: `3x9kp2r.0042.t.example.com`
 
 Base36 (digits 0-9 plus lowercase a-z) is used because it looks like a normal subdomain.
 Base64 is not used because capital letters and plus signs look suspicious in DNS and some
@@ -163,10 +163,10 @@ The 16-bit TXID field in the DNS response carries 2 bytes of session sequence me
 A single client query can trigger multiple recursive lookups, each carrying a response:
 
 ```
-Client queries: x.t.tunnel.example.com A
-  Server responds: CNAME -> <data_chunk_1>.c0.t.tunnel.example.com
-    Server responds: CNAME -> <data_chunk_2>.c1.t.tunnel.example.com
-      Server responds: CNAME -> <data_chunk_3>.c2.t.tunnel.example.com
+Client queries: x.t.example.com A
+  Server responds: CNAME -> <data_chunk_1>.c0.t.example.com
+    Server responds: CNAME -> <data_chunk_2>.c1.t.example.com
+      Server responds: CNAME -> <data_chunk_3>.c2.t.example.com
         Server responds: A 0.0.0.1 (final, also carries last data bytes)
 ```
 

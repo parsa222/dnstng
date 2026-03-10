@@ -262,7 +262,7 @@ Data travels in the subdomain labels of the query FQDN:
 
 ```
 {base36_payload}.{session_id_hex}.t.{tunnel_domain}
-e.g.: 3x9kp2r.0042.t.tunnel.example.com
+e.g.: 3x9kp2r.0042.t.example.com
 ```
 
 - **Base36** (0-9, a-z): lower entropy than base32 or base64; looks like a plausible subdomain.

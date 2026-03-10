@@ -1,81 +1,29 @@
 # TODO.md — DnstTNG Task List
 
-Priority 1 items must be completed before the tunnel is usable end-to-end.
+Priority 1 items are **DONE** — the tunnel data path is wired end-to-end.
 Priority 2 items are required by the spec (`LTMemory.MD`) but not yet implemented.
 Priority 3 items are future ideas beyond the current spec.
 
 ---
 
-## Priority 1 — Critical Integration (Tunnel Is Not Working Without These)
+## Priority 1 — Critical Integration ✅ COMPLETE
 
-These six tasks connect the already-implemented channel/chain/backup code to the actual
-live tunnel data path. The current code sends plain TXT responses and reads only TXT/NULL.
+All six integration tasks are done. The server responds with multi-channel packed
+DNS responses (NAPTR, CAA, SOA, SRV, Auth NS, Additional, EDNS0, TTL steganography,
+CNAME chain, NS referral). The client unpacks them using `channel_unpack()` and
+`chain_parse_*()`. Channel negotiation happens in the SYN/SYN-ACK handshake
+(4-byte bitmask payload). The `dns_server_send_raw()` API sends pre-built DNS packets.
+An end-to-end integration test (`tests/test_integration.c`) covers all of these paths.
 
-### 1. Wire `channel_pack()` into `server/tunnel_server.c`
+Domain convention: the default tunnel domain is `example.com` (single subdomain).
+FQDNs look like `{data}.{session}.t.example.com`.
 
-In `on_dns_query()`, after building the ACK transport packet:
-- Replace the current `encode_to_labels()` + single TXT `dns_server_respond()` call with:
-  ```c
-  channel_buf_t cb;
-  channel_buf_init(&cb, sess->transport.active_channels, ts->cfg.domain);
-  channel_pack(&cb, pkt_buf, pkt_len);
-  uint8_t resp_buf[4096];
-  int n = dns_build_response_ext(query_id, question_fqdn, query_type,
-                                  &cb.resp, resp_buf, sizeof(resp_buf));
-  dns_server_send_raw(ts->dns, resp_buf, (size_t)n, &client_addr);
-  ```
-- Add `dns_server_send_raw()` to `server/dns_server.h/.c` (or equivalent that takes a
-  pre-built packet buffer rather than calling `dns_build_response` internally).
-
-### 2. Wire CNAME/NS chaining into `server/tunnel_server.c`
-
-After task 1 is done:
-- If `sess->transport.active_channels & CHAN_CNAME_CHAIN`, call `chain_build_cname()`
-  instead of the standard response builder. Depth from `ts->cfg.cname_chain_depth`.
-- If `sess->transport.active_channels & CHAN_NS_CHAIN`, call `chain_build_ns_referral()`.
-  Depth from `ts->cfg.ns_chain_depth`.
-
-### 3. Wire `channel_unpack()` into `client/tunnel_client.c`
-
-In the DNS response callback (currently `ares_txt_cb()` or equivalent):
-- Replace the current TXT/NULL-only parsing with:
-  ```c
-  dns_parsed_response_t parsed;
-  if (dns_parse_response_full(buf, len, &parsed) == ERR_OK) {
-      uint8_t flat[4096];
-      int n = channel_unpack(&parsed, sess->transport.active_channels,
-                              flat, sizeof(flat));
-      if (n > 0) transport_parse_packet(flat, (size_t)n, &hdr, &payload, &plen);
-  }
-  ```
-
-### 4. Wire CNAME/NS chain parsing into `client/tunnel_client.c`
-
-After task 3:
-- When the response has CNAME records (type 5 in answer section), call
-  `chain_parse_cname()` to extract the chain data and feed it to `channel_unpack`.
-- When the response has NS records in the authority section, call
-  `chain_parse_ns_referral()`.
-
-### 5. Add `dns_server_send_raw()` to `server/dns_server.c`
-
-Current `dns_server_respond()` takes `(data, len)` and always builds a TXT record.
-Add a new function that takes a pre-built UDP packet buffer and sends it as-is:
-```c
-void dns_server_send_raw(dns_server_t *srv, const uint8_t *buf, size_t len,
-                         const struct sockaddr *addr);
-```
-This allows `tunnel_server.c` to use `dns_build_response_ext()` directly.
-
-### 6. Implement channel negotiation in the SYN handshake
-
-Currently `transport_ctx_t.active_channels` is never set during a real session.
-- During SYN: client encodes supported `CHAN_*` bitmask in the SYN payload.
-- Server responds in SYN-ACK with the intersection of what it supports and what
-  the client reported from `--check`.
-- Both sides store the negotiated bitmask in `sess->transport.active_channels`.
-- The `--check` mode in `client/check.c` already probes channels; its result must be
-  written back into `client_config_t.active_channels` for use in the SYN.
+- [x] **1. Wire `channel_pack()` into `server/tunnel_server.c`**
+- [x] **2. Wire CNAME/NS chaining into `server/tunnel_server.c`**
+- [x] **3. Wire `channel_unpack()` into `client/tunnel_client.c`**
+- [x] **4. Wire CNAME/NS chain parsing into `client/tunnel_client.c`**
+- [x] **5. Add `dns_server_send_raw()` to `server/dns_server.c`**
+- [x] **6. Implement channel negotiation in the SYN handshake**
 
 ---
 
@@ -141,11 +89,12 @@ window (default 120s). Server must hold session state for 120s after last query.
 - Add `last_seen_ms` to the server session struct.
 - On SYN with an existing `session_id`, resume rather than creating a new session.
 
-### 16. Integration test
+### 16. Integration test ✅ DONE
 
-Create `tests/test_integration.c`: full client-server loopback with a synthetic DNS
-resolver in the middle. Sends a blob of data, verifies it arrives intact on the other side.
-Add to `CMakeLists.txt`.
+`tests/test_integration.c` is implemented with 7 sub-tests covering the full pipeline:
+SYN handshake with channel negotiation, data round-trip through multi-channel, CNAME chain,
+NS referral chain, upstream/downstream FQDN encoding, all channels combined, and config
+defaults verification.
 
 ### 17. Cross-compilation toolchain files
 
