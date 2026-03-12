@@ -1,3 +1,5 @@
+# FULLY VIBE CODED
+
 # DnsTNG — DNS Tunneling New Generation
 
 Yes, this is a DNS tunnel. Yes, you have seen these before. This one just happens to use every single
