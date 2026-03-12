@@ -1,12 +1,12 @@
 # TODO.md — DnstTNG Task List
 
 Priority 1 items are **DONE** — the tunnel data path is wired end-to-end.
-Priority 2 items are marked with status: ✅ DONE or ⬜ NOT YET IMPLEMENTED.
+Priority 2 items are marked with
 Priority 3 items are future ideas beyond the current spec.
 
 ---
 
-## Priority 1 — Critical Integration ✅ COMPLETE
+## Priority 1 — Critical Integration 
 
 All six integration tasks are done. The server responds with multi-channel packed
 DNS responses (NAPTR, CAA, SOA, SRV, Auth NS, Additional, EDNS0, TTL steganography,
@@ -27,9 +27,7 @@ FQDNs look like `{data}.{session}.t.example.com`.
 
 ---
 
-## Priority 2 — Spec-Required Features (`LTMemory.MD`)
-
-### 7. Adaptive window size (`LTMemory` §7) ✅ DONE
+### 7. Adaptive window size (`LTMemory` §7) 
 
 EWMA-based RTT measurement and dynamic window adjustment (min 2, max 32).
 Implemented in `common/transport.c` via `transport_update_rtt()`.
@@ -37,7 +35,7 @@ Implemented in `common/transport.c` via `transport_update_rtt()`.
 - Window grows by 1 when RTT improves, shrinks by 1 when RTT degrades >25%.
 - Tested in `test_integration.c::test_adaptive_window`.
 
-### 8. Adaptive poll interval (`LTMemory` §7) ✅ DONE
+### 8. Adaptive poll interval (`LTMemory` §7) 
 
 Ramps from 100ms (active traffic) to 4s (idle), iodine-inspired.
 Implemented in `client/tunnel_client.c` via `poll_timer_cb()`.
@@ -49,7 +47,7 @@ Implemented in `client/tunnel_client.c` via `poll_timer_cb()`.
 
 Print live stats to stderr every 5 seconds during tunnel operation.
 
-### 10. Query type rotation (`LTMemory` §8) ✅ DONE
+### 10. Query type rotation (`LTMemory` §8) 
 
 Rotates between TXT, AAAA, A, SRV, NAPTR every 30-120 queries (randomized).
 Implemented in `common/transport.c` via `transport_next_query_type()`.
@@ -71,13 +69,13 @@ Probe 4096, 2048, 1232, 512 and find the largest that survives end-to-end.
 
 Test whether QCLASS CH (3) or HS (4) gets forwarded by the resolver.
 
-### 15. Session resume (`LTMemory` §9) ✅ DONE (foundation)
+### 15. Session resume (`LTMemory` §9)
 
 Session resume token generation implemented in `common/transport.c` via
 `transport_generate_token()`. 8-byte random tokens stored in `transport_ctx_t`.
 Server session timeout is 5 minutes. Full wire-protocol resume is a future TODO.
 
-### 16. Integration test ✅ DONE
+### 16. Integration test 
 
 `tests/test_integration.c` has **15 comprehensive sub-tests** covering:
 PSK encryption, random ISN, channel negotiation, multi-channel data,
@@ -97,7 +95,7 @@ stealth entropy, and full session lifecycle (SYN→DATA→FIN).
 
 ## Priority 2+ — dnscat2/iodine-Inspired Features
 
-### 21. PSK Payload Encryption (dnscat2-inspired) ✅ DONE
+### 21. PSK Payload Encryption (dnscat2-inspired)  DONE
 
 Implemented in `common/crypto.c/h`. PSK-derived XOR stream cipher using a
 mixing function to generate per-packet keystreams. 2-byte nonce per packet.
@@ -107,14 +105,15 @@ mixing function to generate per-packet keystreams. 2-byte nonce per packet.
 - Tested in `test_integration.c::test_psk_encryption_roundtrip`
   and `test_encrypted_transport_pipeline`
 
-### 22. Random Initial Sequence Numbers (dnscat2-inspired) ✅ DONE
+### 22. Random Initial Sequence Numbers (dnscat2-inspired)  DONE
 
 Initial sequence numbers are now randomized using `stealth_rand32()`
 instead of starting at 0. Prevents session hijacking attacks.
 - Implemented in `common/transport.c::transport_init()`
 - Tested in `test_integration.c::test_random_isn`
 
-### 23. Lazy Mode — Server-Side Pending Query Queue (iodine-inspired) ✅ DONE
+### 23. Lazy Mode — Server-Side Pending Query Queue (iodine-inspired) 
+ DONE
 
 When the server has no data to send, it queues the DNS query instead of
 responding immediately. When data arrives, it responds to the oldest
